@@ -1,0 +1,5 @@
+# Vulkan uses the SPIR-V outputs embedded by main.c3; the other generated
+# targets keep the same ABI for shader-pipeline validation.
+c3/examples/assets/04_svt.slang vertexMain vertex 04_svt.vert
+c3/examples/assets/04_svt.slang compositeMain fragment 04_svt_composite.frag
+c3/examples/assets/04_svt_feedback.slang feedbackMain fragment 04_svt_feedback.frag

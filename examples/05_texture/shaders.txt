@@ -1,0 +1,2 @@
+05_texture.slang vertexMain vertex 05_texture.vert
+05_texture.slang fragmentMain fragment 05_texture.frag

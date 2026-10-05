@@ -1,0 +1,5 @@
+# The shared RHI layer consumes the canonical precompiled ImGui shaders. Keep
+# this example manifest in the C3 shader pipeline as the source-of-truth
+# validation/portable build for the same shader ABI.
+c3/examples/assets/imgui.slang vertexMain vertex imgui.vert
+c3/examples/assets/imgui.slang fragmentMain fragment imgui.frag

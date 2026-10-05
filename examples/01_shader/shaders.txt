@@ -1,0 +1,2 @@
+c3/examples/assets/01_mandelbrot.slang vertexMain vertex fullscreen.vert
+c3/examples/assets/01_mandelbrot.slang fragmentMain fragment mandelbrot.frag

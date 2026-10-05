@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<!-- Copyright 2026 Michael Pollind -->
+<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rhi 00_clear</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+  #canvas { display: block; width: 100vw; height: 100vh; }
+  #log {
+    position: fixed; left: 0; bottom: 0; margin: 0; max-height: 40vh; overflow: auto;
+    padding: 4px 8px; color: #fff; background: rgba(0, 0, 0, 0.6);
+    font: 12px/1.4 monospace; white-space: pre-wrap;
+  }
+  #log:empty { display: none; }
+  #log .error { color: #ff6b6b; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<pre id="log"></pre>
+<script type="module">
+  import { boot } from "./glue.js";
+
+  const logEl = document.getElementById("log");
+  const logLine = (text, cls) => {
+    const line = document.createElement("div");
+    if (cls) line.className = cls;
+    line.textContent = text;
+    logEl.appendChild(line);
+  };
+
+  // ?backend=webgl forces WebGL2; ?backend=webgpu forbids the fallback.
+  const requested = new URLSearchParams(location.search).get("backend");
+  const forceBackend = requested === "webgl" || requested === "webgpu" ? requested : undefined;
+
+  try {
+    const app = await boot("./00_clear.wasm", { canvas: "#canvas", forceBackend, log: console });
+    const name = app.backend === "webgpu" ? "WebGPU" : "WebGL2";
+    document.title = `rhi 00_clear (${name})`;
+    logLine(`backend: ${name}`);
+  } catch (e) {
+    const message = e && e.message ? e.message : String(e);
+    console.error("[rhi] boot failed:", e);
+    document.title = "rhi 00_clear (failed)";
+    logLine(`boot failed: ${message}`, "error");
+  }
+</script>
+</body>
+</html>

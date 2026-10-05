@@ -1,0 +1,2 @@
+c3/examples/assets/02_mesh.slang vertexMain vertex 02_mesh.vert
+c3/examples/assets/02_mesh.slang fragmentMain fragment 02_mesh.frag
