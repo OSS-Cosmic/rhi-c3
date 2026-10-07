@@ -1,7 +1,6 @@
 {
-  // C3 port of rhi-odin, built side by side with the Odin tree.
-  // Run from c3/ through ./build.py test and ./build.py check; the root
-  // compatibility wrappers remain ../build.py c3-test and ../build.py c3-check.
+  // C3 RHI.
+  // Built via Meson, see README.md.
   "langrev": "1",
   "warnings": [ "no-unused" ],
   "dependency-search-paths": [ ],
@@ -12,13 +11,13 @@
   "test-sources": [ "test/**" ],
   "build-dir": "build",
   // Ported backends (see "Backend gating" in README.md).
-  "features": [ "RHI_VK", "RHI_MTL", "RHI_WGPU", "RHI_WEBGL", "RHI_IMGUI" ],
+  "features": [ "RHI_VK", "RHI_MTL", "RHI_WGPU", "RHI_WEBGL", "RHI_IMGUI", "RHI_DX12" ],
   // The vendor extern fns resolve against the local VMA/ImGui archives and
   // the C++ runtime. c3c has no per-OS link keys; these only take effect
   // when an executable is linked (`c3c test` on the host), never for the
   // static-lib cross builds of c3-check.
-  "linker-search-paths": [ "vendor/vma/lib", "../vendor/imgui/lib" ],
-  "linked-libraries": [ "vma", "imgui", "stdc++" ],
+  "linker-search-paths": [ "vendor/vma/lib", "vendor/imgui_c/lib", "vendor/volk/lib" ],
+  "linked-libraries": [ "vma", "imgui", "volk", "stdc++" ],
   "output": "build",
   "targets": {
     "rhi": {

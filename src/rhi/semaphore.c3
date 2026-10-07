@@ -64,3 +64,45 @@ fn void semaphore_deinit(Semaphore* s, Device* device)
 			break;
 	}
 }
+
+// ---- metal ----
+
+// Metal has no binary semaphores; GPU-GPU synchronization uses timelines
+// (MTLSharedEvent) instead. Keep this separate from the swapchain.
+module rhi @feat(RHI_MTL & DARWIN & !RHI_HEADLESS);
+
+struct SemaphoreMtl { char _unused; }
+
+fn Semaphore? semaphore_init_mtl(Device* device)
+{
+	return UNSUPPORTED_FEATURE~;
+}
+
+fn void semaphore_deinit_mtl(Semaphore* s, Device* device)
+{
+}
+
+// ---- vulkan ----
+
+// Vulkan binary semaphore.
+module rhi @feat(RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
+import vk;
+
+struct SemaphoreVk
+{
+	vk::Semaphore semaphore;
+}
+
+fn Semaphore? semaphore_init_vk(Device* device)
+{
+	vk::SemaphoreCreateInfo create_info = { .sType = SEMAPHORE_CREATE_INFO };
+	vk::Semaphore semaphore;
+	vk_check(device.backend.vk.vtable.createSemaphore(device.backend.vk.device, &create_info, null, &semaphore))!;
+	return { .backend.vk = { .semaphore = semaphore } };
+}
+
+fn void semaphore_deinit_vk(Semaphore* s, Device* device)
+{
+	device.backend.vk.vtable.destroySemaphore(device.backend.vk.device, s.backend.vk.semaphore, null);
+	s.backend.vk.semaphore = 0;
+}

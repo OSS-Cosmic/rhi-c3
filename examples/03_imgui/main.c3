@@ -1,7 +1,7 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// 03_imgui: the Vulkan C3 counterpart of examples/03_imgui/main.odin.
+// 03_imgui: Vulkan ImGui demo.
 //
 // The ImGui renderer and its embedded shaders live in rhi::imgui. This file
 // owns only the example lifecycle and the SDL -> ImGui input translation.
@@ -45,7 +45,7 @@ struct ImguiState
 
 ImguiState state;
 
-// ImGuiKey values are stable public values in the pinned dear_bindings ABI.
+// ImGuiKey values are stable public values in the pinned vendor/imgui_c/imgui ABI.
 // SDL scancodes are deliberately translated instead of being passed through:
 // ImGui's named keys occupy a different numeric range.
 const int IMGUI_KEY_TAB = 512;
@@ -180,7 +180,7 @@ fn void imgui_forward_utf8(sdl3::TextInputEvent* event)
 
 fn void imgui_draw_status()
 {
-	if (imgui::begin("rhi-odin", null, 0))
+	if (imgui::begin("rhi", null, 0))
 	{
 		imgui::text("Dear ImGui on the RHI (Vulkan backend)");
 		float fps = state.frame_dt > 0 ? 1.0 / state.frame_dt : 0;

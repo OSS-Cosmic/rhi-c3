@@ -1,7 +1,7 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// Backend-parameterized GPU sanity suite ported from rhi/sanity_test.odin.
+// Backend-parameterized GPU sanity suite
 // This C3 target currently enables only Vulkan; keeping Backend in the
 // environment and runner preserves the generic harness shape for later
 // backends without creating un-gated tests for them.
@@ -11,8 +11,8 @@ import std::collections::list;
 import std::atomic;
 import vk;
 
-const char[*] SANITY_COLOR_VERT_SPV @align(4) = $embed("../../../rhi/testdata/sanity_color.vert.spv");
-const char[*] SANITY_COLOR_FRAG_SPV @align(4) = $embed("../../../rhi/testdata/sanity_color.frag.spv");
+const char[*] SANITY_COLOR_VERT_SPV @align(4) = $embed("testdata/sanity_color.vert.spv");
+const char[*] SANITY_COLOR_FRAG_SPV @align(4) = $embed("testdata/sanity_color.frag.spv");
 
 const uint SANITY_WIDTH = 64;
 const uint SANITY_HEIGHT = 64;

@@ -1,0 +1,25 @@
+# Build output
+/build/
+/obj/
+
+# Python
+__pycache__/
+*.pyc
+
+# Meson build dir
+/build-meson/
+
+# Vendored libraries (built by Meson, see meson.build)
+/vendor/vma/lib/
+/vendor/volk/lib/
+/vendor/imgui_c/lib/
+/vendor/d3d12ma/lib/
+
+# Agent harness
+.agentic-loop/
+
+# Editor / OS noise
+.DS_Store
+*.swp
+.vscode/
+.idea/

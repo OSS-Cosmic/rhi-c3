@@ -30,7 +30,6 @@ const html = readFileSync(join(bundle, "index.html"), "utf8");
 assert.ok(!html.includes("{{WASM_NAME}}"), "index.html still contains the {{WASM_NAME}} placeholder");
 assert.ok(html.includes(`"./${wasmFile}"`), `index.html must boot ./${wasmFile}`);
 assert.ok(html.includes('import { boot } from "./glue.js"'), "index.html must import ./glue.js");
-assert.ok(!html.includes("odin.js"), "C3 bundle must not depend on the Odin runtime");
 
 const c3Source = readFileSync(join(root, "c3/src/rhi/rhi.c3"), "utf8");
 const match = c3Source.match(/^const\s+GLUE_ABI_VERSION\s*=\s*(\d+)/m);

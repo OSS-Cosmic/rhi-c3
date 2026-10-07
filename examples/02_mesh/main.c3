@@ -1,8 +1,7 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// A rotating, indexed cube. This is the C3 rendering half of the Odin
-// examples/02_mesh demo, using the shared platform::App lifecycle.
+// A rotating, indexed cube. Uses the shared platform::App lifecycle.
 //
 // The rendering path itself only uses rhi's backend-neutral API. In
 // particular, vertex slot 0 is intentional: the Metal backend adds
@@ -35,7 +34,7 @@ struct PushConsts
 }
 
 // The cube's 24 float3 positions and 36 uint16 indices are kept byte-for-byte
-// equivalent to examples/02_mesh/main.odin.
+// stable.
 const ushort[36] CUBE_INDEX = {
 	0, 1, 2, 2, 1, 3,
 	4, 6, 5, 5, 6, 7,
@@ -96,7 +95,7 @@ struct MeshState
 MeshState state;
 
 // Parse the command-line arguments forwarded by platform::run. The last
-// --frames wins, matching the Odin demo; zero means run forever and a
+// --frames wins; zero means run forever and a
 // negative value makes mesh_app_init fail.
 fn void mesh_app_parse_args(String[] args)
 {

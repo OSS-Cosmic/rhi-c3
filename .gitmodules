@@ -1,0 +1,6 @@
+[submodule "vendor/imgui_c/imgui"]
+	path = vendor/imgui_c/imgui
+	url = https://github.com/ocornut/imgui.git
+[submodule "vendor/volk"]
+	path = vendor/volk
+	url = https://github.com/zeux/volk.git

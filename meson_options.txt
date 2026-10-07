@@ -1,0 +1,4 @@
+option('c3c', type: 'string', value: '', description: 'c3c compiler path (default: $C3C or c3c on PATH)')
+option('d3d12ma_cxx', type: 'string', value: '', description: 'mingw-w64 g++ for d3d12ma (default: $D3D12MA_CXX or x86_64-w64-mingw32-g++)')
+option('slangc', type: 'string', value: '', description: 'slangc shader compiler path (default: $SLANGC or slangc on PATH)')
+option('spirv_cross', type: 'string', value: '', description: 'spirv-cross path for WebGL2 GLSL (default: $SPIRV_CROSS or spirv-cross on PATH)')

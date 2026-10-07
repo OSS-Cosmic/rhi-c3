@@ -227,7 +227,7 @@ fn void vk_swapchain_present_test() @test
 	}
 
 	sdl3::Window sdl_window = sdl3::create_window(
-		"rhi-odin Vulkan swapchain", 64, 64,
+		"rhi Vulkan swapchain", 64, 64,
 		sdl3::SDL_WINDOW_HIDDEN | sdl3::SDL_WINDOW_VULKAN);
 	if (!sdl_window)
 	{

@@ -1,9 +1,7 @@
 # rhi C3 examples
 
 This directory is the C3-side home for the example shader assets and shader
-manifests. The example names mirror the Odin examples in
-[`../../examples`](../../examples), but C3 builds use only files beneath this
-directory and do not depend on Odin example sources.
+manifests. C3 builds use only files beneath this directory.
 
 ## Examples
 
@@ -24,8 +22,7 @@ c3/examples/assets/02_mesh.slang vertexMain vertex 02_mesh.vert
 
 Paths beginning with `c3/` are resolved from the repository root and then
 normalized beneath `c3`; paths such as `05_texture.slang` are relative to the
-manifest. The source, entry-point, stage, and output-name fields intentionally
-match the Odin manifests. `00_clear` has no shader source of its own.
+manifest. The source, entry-point, stage, and output-name fields are fixed. `00_clear` has no shader source of its own.
 
 ## Target and backend matrix
 
@@ -41,7 +38,7 @@ also gated by the target, so the matrix for `c3-check` is:
 
 "Gated" means the backend is unavailable for that target. The WebGPU/WebGL2
 sources are feature-gated to wasm32, so native examples target Vulkan on Linux
-and Windows and Metal on macOS, while `c3-web` builds the browser backends with
+and Windows and Metal on macOS, while `meson compile -C build-meson web` builds the browser backends with
 the platform glue and bundle assets included here.
 
 ## Prerequisites
@@ -50,44 +47,33 @@ the platform glue and bundle assets included here.
 - SDL3 for native windows. The C3 SDL binding links `SDL3`; on Linux, the
   system development link or the runtime-library symlink created by the root
   build helper must be available.
-- VMA for Vulkan allocations. From the repository root, `./build.py vma`
-  creates `vendor/vma/lib/libvma.a`; `./build.py c3-test` builds it when it is
-  missing.
-- Dear ImGui for `03_imgui` and `04_svt`: initialize the `vendor/imgui` and
-  `vendor/imgui/odin-imgui` submodules, then run `./build.py imgui`. The
-  examples are native-only and the runner enables `RHI_IMGUI` only for these
-  two targets.
-- `slangc` and SPIRV-Cross for shader preprocessing. The root helper fetches
-  or builds them with `./build.py shader-tools`; set `SLANGC` to use an
-  existing compiler in an offline checkout.
+- VMA for Vulkan allocations. From the repository root,
+  `meson compile -C build-meson` creates `vendor/vma/lib/libvma.a`.
+- Dear ImGui for `03_imgui` and `04_svt`: initialize the `vendor/imgui_c/imgui`
+  submodule (`git submodule update --init vendor/imgui_c/imgui`), then run
+  `meson compile -C build-meson`. The examples are native-only and the runner
+  enables `RHI_IMGUI` only for these two targets.
+- `slangc` and SPIRV-Cross for shader preprocessing; set `SLANGC` / `SPIRV_CROSS`
+  to use existing binaries in an offline checkout.
 
 ## Build, check, and test commands
 
-Run the root helper from the repository root. The C3 commands build or check
-the C3 port; the ordinary `example`, `examples`, `check`, and `test` commands
-still refer to the Odin examples.
+Run Meson from the repository root.
 
 ```sh
-./build.py c3-check                         # C3 static library: all targets
-./build.py c3-test                          # C3 @test functions on the host
-./build.py c3-runner-selftest               # non-GPU runner and manifest checks
-./build.py c3-web                           # build and validate the four browser bundles
-./build.py c3-examples --check               # compile-only check of all examples
-./build.py c3-examples --check --headless   # compile-only check with RHI_HEADLESS
-./build.py c3-example 00_clear -- --frames 3 # build and run one C3 example
-(cd c3 && c3c build --target linux-x64)     # one C3 target directly
-(cd c3 && c3c test)                         # C3 tests directly
-
-./build.py example 00_clear -- --frames 3  # Odin example smoke run
-./build.py examples                         # Odin examples, desktop and web
-./build.py check                            # Odin package/example checks
-./build.py test                             # Odin tests and example smoke tests
+meson compile -C build-meson                # vendor archives (vma, imgui if present)
+meson test -C build-meson                   # C3 @test functions on the host
+meson compile -C build-meson check          # C3 static library: all targets
+meson compile -C build-meson web            # browser bundles: 00, 01, 02, 05
+meson compile -C build-meson vulkan         # native Vulkan examples 00-04
+c3c build --target linux-x64                # one C3 target directly
+c3c test                                    # C3 tests directly
 ```
 
 Browser examples are built with `RHI_WGPU` and `RHI_WEBGL`. The shared platform
 exports the wasm lifecycle and pointer-event callbacks;
 the browser bundle supplies WebGPU-first/WebGL2-fallback boot, zero-size canvas
-handling, and the ABI/import/export checks used by `c3-web`.
+handling, and the ABI/import/export checks of the browser bundle.
 
 ## Shader outputs
 
@@ -112,5 +98,5 @@ manifest entry.
 
 The WGSL and GLSL forms, browser boot assets, and wasm lifecycle contract are
 in place. A successful `c3c build --target wasm32` is still not proof that an
-example can run in a browser; use `./build.py c3-web`, which also validates the
-browser backend imports and lifecycle exports.
+example can run in a browser; the browser bundle must also pass the backend
+import and lifecycle export checks.

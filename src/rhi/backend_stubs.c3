@@ -1,9 +1,8 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// Stand-in payload structs for backends that are not compiled in. Port of the
-// `when !HAS_X { X_Vk :: struct {} }` blocks at the top of the Odin front
-// files, gathered here because C3 can only gate top-level declarations with
+// Stand-in payload structs for backends that are not compiled in. Gathered
+// here because C3 can only gate top-level declarations with
 // feature flags.
 //
 // Each section's `@feat` is the negation of that backend's `HAS_*` const in
@@ -44,6 +43,7 @@ struct SwapchainVk { char _unused; }
 struct ProgramVk { char _unused; }
 struct ProgramPipelineSlotVk { char _unused; }
 struct ProgramDescriptorSetVk { char _unused; }
+struct QueryPoolVk { char _unused; }
 
 // ---- d3d12 ----
 module rhi @feat(!(RHI_DX12 & !RHI_HEADLESS & !WASM & WIN32));
@@ -64,6 +64,8 @@ struct ImageViewDx12 { char _unused; }
 struct SamplerDx12 { char _unused; }
 struct ShaderDx12 { char _unused; }
 struct PipelineDx12 { char _unused; }
+struct QueryPoolDx12 { char _unused; }
+struct AccelStructureDx12 { char _unused; }
 
 // ---- metal ----
 // DARWIN already implies !WASM.

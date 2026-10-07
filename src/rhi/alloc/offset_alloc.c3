@@ -98,7 +98,7 @@ fn uint small_float_uint_to_float_round_down(uint size)
 	return (exp << MANTISSA_BITS) | mantissa;
 }
 
-// Named `small_float_float_to_uint` in the Odin tree; renamed so it doesn't
+// Named `small_float_to_uint` to avoid a clash: it doesn't
 // collide with the `small_float_float_to_uint` @test in the same module.
 fn uint small_float_to_uint(uint float_value)
 {

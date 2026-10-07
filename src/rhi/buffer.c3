@@ -288,3 +288,318 @@ fn void buffer_flush(Buffer* b, Device* device)
 			$endif
 	}
 }
+
+// ---- metal ----
+
+// Metal buffer. Port of the `.mtl` arms of rhi-zig's `buffer.zig`
+// `initGeneral`/`deinit`.
+//
+// Shared storage is CPU-visible and always mapped, so `mapped_region` points
+// straight at the buffer's contents (no staging/blit needed on Apple Silicon).
+module rhi @feat(RHI_MTL & DARWIN & !RHI_HEADLESS);
+import mtl;
+
+struct BufferMtl
+{
+	// Owned: +1 from -newBufferWithLength:options:.
+	mtl::Buffer buffer;
+	ulong size;
+	bool shared;
+}
+
+fn Buffer? buffer_init_general_mtl(Device* device, BufferDesc desc)
+{
+	if (desc.size <= 0) return UNSUPPORTED_FEATURE~;
+	if ((ulong)desc.size > device.adapter.buffer_max_size) return UNSUPPORTED_FEATURE~;
+	// rhi-zig always uses StorageModeShared. Extension: PREFER_DEVICE maps to
+	// StorageModePrivate (GPU-only, no host mapping; fill it with a blit).
+	bool shared = desc.buffer_usage != PREFER_DEVICE;
+	mtl::ResourceOptions options = shared ? mtl::RESOURCE_STORAGE_MODE_SHARED : mtl::RESOURCE_STORAGE_MODE_PRIVATE;
+	mtl::Buffer buffer = device.backend.mtl.device.new_buffer((NSUInteger)desc.size, options);
+	if (!buffer) return OUT_OF_DEVICE_MEMORY~;
+	char[] mapped_region;
+	if (shared)
+	{
+		char* contents = (char*)buffer.contents();
+		if (contents)
+		{
+			mapped_region = contents[:desc.size];
+		}
+		else
+		{
+			buffer.release();
+			return INITIALIZATION_FAILED~;
+		}
+	}
+	return {
+		.cookie = next_cookie(),
+		.mapped_region = mapped_region,
+		.backend.mtl = { .buffer = buffer, .size = (ulong)desc.size, .shared = shared },
+	};
+}
+
+fn void buffer_deinit_mtl(Buffer* b, Device* device)
+{
+	if (b.backend.mtl.buffer) b.backend.mtl.buffer.release();
+	b.backend.mtl = {};
+}
+
+// ---- dx12 ----
+
+// Direct3D 12 buffer. Port of the `.dx12` arms of rhi-zig's `buffer.zig`
+// `initGeneral`/`deinit`: a committed-or-placed buffer resource from
+// D3D12MemoryAllocator in a DEFAULT, UPLOAD or READBACK heap. CPU-visible
+// heaps are persistently mapped and exposed through `Buffer.mapped_region`.
+module rhi @feat(RHI_DX12 & !RHI_HEADLESS & !WASM & WIN32);
+import d3d12, dxgi, d3d12ma;
+
+struct BufferDx12
+{
+	// Owned: frees the underlying resource too.
+	d3d12ma::Allocation allocation;
+	// Borrowed from `allocation`.
+	d3d12::Resource* resource;
+	d3d12::GpuVirtualAddress gpu_address;
+	d3d12::HeapType heap_type;
+	// The state the resource was created in.
+	d3d12::ResourceStates initial_state;
+	ulong size;
+	// Persistent CPU mapping, or null for DEFAULT heap buffers.
+	void* mapped;
+}
+
+fn d3d12::HeapType buffer_heap_type_dx12(BufferDesc desc) @private
+{
+	switch (desc.buffer_usage)
+	{
+		case READBACK: return d3d12::HeapType.READBACK;
+		case PREFER_HOST: return d3d12::HeapType.UPLOAD;
+		case AUTO:
+		case PREFER_DEVICE:
+			// A persistent mapping needs a CPU-visible heap.
+			return desc.persistent_map ? d3d12::HeapType.UPLOAD : d3d12::HeapType.DEFAULT;
+	}
+}
+
+fn Buffer? buffer_init_general_dx12(Device* device, BufferDesc desc)
+{
+	if (desc.size <= 0) return UNSUPPORTED_FEATURE~;
+	if ((ulong)desc.size > device.adapter.buffer_max_size) return UNSUPPORTED_FEATURE~;
+
+	d3d12::HeapType heap_type = buffer_heap_type_dx12(desc);
+	// UPLOAD heaps must be created GENERIC_READ and READBACK heaps COPY_DEST;
+	// neither can transition.
+	d3d12::ResourceStates initial_state = d3d12::RESOURCE_STATE_COMMON;
+	if (heap_type == d3d12::HeapType.UPLOAD)
+	{
+		initial_state = d3d12::RESOURCE_STATE_GENERIC_READ;
+	}
+	else if (heap_type == d3d12::HeapType.READBACK)
+	{
+		initial_state = d3d12::RESOURCE_STATE_COPY_DEST;
+	}
+	else if (desc.usage.acceleration_structure_storage)
+	{
+		initial_state = d3d12::RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+	}
+
+	// UAV access is only legal on DEFAULT heap resources.
+	d3d12::ResourceFlags flags = d3d12::RESOURCE_FLAG_NONE;
+	if (heap_type == d3d12::HeapType.DEFAULT
+		&& (desc.usage.shader_resource_storage || desc.usage.scratch_buffer || desc.usage.acceleration_structure_storage))
+	{
+		flags |= d3d12::RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+	}
+
+	d3d12::ResourceDesc resource_desc = {
+		.dimension = d3d12::ResourceDimension.BUFFER,
+		.alignment = 0,
+		.width = (ulong)desc.size,
+		.height = 1,
+		.depth_or_array_size = 1,
+		.mip_levels = 1,
+		.format = dxgi::Format.UNKNOWN,
+		.sample_desc = { .count = 1, .quality = 0 },
+		.layout = d3d12::TextureLayout.ROW_MAJOR,
+		.flags = flags,
+	};
+	d3d12ma::AllocationDesc alloc_desc = { .heap_type = (int)heap_type };
+
+	d3d12ma::Allocation allocation;
+	int hr = d3d12ma::create_resource(device.backend.dx12.allocator, &alloc_desc, &resource_desc, (uint)initial_state, null, &allocation, null);
+	if (hr < 0 || !allocation) return OUT_OF_DEVICE_MEMORY~;
+
+	d3d12::Resource* resource = (d3d12::Resource*)d3d12ma::allocation_get_resource(allocation);
+	void* mapped;
+	char[] mapped_region;
+	if (heap_type != d3d12::HeapType.DEFAULT)
+	{
+		// READBACK is read by the CPU; UPLOAD is write-only (empty read range).
+		ulong read_end = heap_type == d3d12::HeapType.READBACK ? (ulong)desc.size : 0;
+		if (d3d12ma::map(allocation, 0, read_end, &mapped) < 0 || !mapped)
+		{
+			d3d12ma::free_allocation(allocation);
+			return INITIALIZATION_FAILED~;
+		}
+		mapped_region = ((char*)mapped)[:desc.size];
+	}
+	return {
+		.cookie = next_cookie(),
+		.mapped_region = mapped_region,
+		.backend.dx12 = {
+			.allocation = allocation,
+			.resource = resource,
+			.gpu_address = resource.vtbl.get_gpu_virtual_address(resource),
+			.heap_type = heap_type,
+			.initial_state = initial_state,
+			.size = (ulong)desc.size,
+			.mapped = mapped,
+		},
+	};
+}
+
+fn void buffer_deinit_dx12(Buffer* b, Device* device)
+{
+	BufferDx12* state = &b.backend.dx12;
+	if (state.allocation)
+	{
+		if (state.mapped) d3d12ma::unmap(state.allocation, 0, 0);
+		d3d12ma::free_allocation(state.allocation);
+	}
+	*state = {};
+}
+
+// ---- vulkan ----
+
+// Vulkan buffers backed by VMA.; host-visible allocations expose their mapped bytes through
+// the front Buffer.mapped_region slice.
+module rhi @feat(RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
+import vk, vma;
+
+struct BufferVk
+{
+	vk::Buffer buffer;
+	vma::Allocation allocation;
+	ulong size;
+}
+
+fn vk::BufferUsageFlags buffer_usage_flags_vk(Device* device, BufferDesc desc) @private
+{
+	vk::BufferUsageFlags usage;
+	if (desc.usage.device_address || device.adapter.backend.vk.is_buffer_device_address_supported) {
+		usage |= vk::BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+	}
+	if (desc.usage.transfer_dst) usage |= vk::BUFFER_USAGE_TRANSFER_DST_BIT;
+	if (desc.usage.transfer_src) usage |= vk::BUFFER_USAGE_TRANSFER_SRC_BIT;
+	if (desc.usage.vertex_buffer) usage |= vk::BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	if (desc.usage.index_buffer) usage |= vk::BUFFER_USAGE_INDEX_BUFFER_BIT;
+	if (desc.usage.constant_buffer) usage |= vk::BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+	if (desc.usage.argument_buffer || desc.usage.indirect) usage |= vk::BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+	if (desc.usage.scratch_buffer) usage |= vk::BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	if (desc.usage.shader_binding_table) usage |= vk::BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
+	if (desc.usage.acceleration_structure_storage) usage |= vk::BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+	if (desc.usage.acceleration_structure_build_input) usage |= vk::BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+	if (desc.usage.micromap_storage) usage |= vk::BUFFER_USAGE_MICROMAP_STORAGE_BIT_EXT;
+	if (desc.usage.micromap_build_input) usage |= vk::BUFFER_USAGE_MICROMAP_BUILD_INPUT_READ_ONLY_BIT_EXT;
+	if (desc.stride == 0 || desc.stride == 4)
+	{
+		if (desc.usage.shader_resource) usage |= vk::BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+		if (desc.usage.shader_resource_storage) usage |= vk::BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+	}
+	if (desc.stride > 0)
+	{
+		usage |= vk::BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	}
+	return usage;
+}
+
+fn vma::AllocationCreateInfo buffer_allocation_info_vk(BufferDesc desc) @private
+{
+	vma::AllocationCreateInfo info = {};
+	switch (desc.buffer_usage)
+	{
+		case AUTO: info.usage = vma::MemoryUsage.AUTO;
+		case PREFER_DEVICE: info.usage = vma::MemoryUsage.AUTO_PREFER_DEVICE;
+		case PREFER_HOST: info.usage = vma::MemoryUsage.AUTO_PREFER_HOST;
+		case READBACK:
+			info.usage = vma::MemoryUsage.AUTO_PREFER_HOST;
+			info.flags |= vma::ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+			info.flags |= vma::ALLOCATION_CREATE_MAPPED_BIT;
+	}
+	if (desc.persistent_map && desc.buffer_usage != READBACK)
+	{
+		info.flags |= desc.sequential_access
+			? vma::ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+			: vma::ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT;
+		info.flags |= vma::ALLOCATION_CREATE_MAPPED_BIT;
+	}
+	return info;
+}
+
+fn Buffer? buffer_init_general_vk(Device* device, BufferDesc desc)
+{
+	if (desc.size <= 0) return UNSUPPORTED_FEATURE~;
+	vk::BufferCreateInfo create_info = {
+		.sType = vk::StructureType.BUFFER_CREATE_INFO,
+		.size = (vk::DeviceSize)desc.size,
+		.usage = buffer_usage_flags_vk(device, desc),
+		.sharingMode = vk::SharingMode.EXCLUSIVE,
+	};
+	vma::AllocationCreateInfo allocation_info = buffer_allocation_info_vk(desc);
+	vk::Buffer buffer;
+	vma::Allocation allocation;
+	vma::AllocationInfo vma_info;
+	vk::Result result = vma::create_buffer(device.backend.vk.vma_allocator, &create_info, &allocation_info, &buffer, &allocation, &vma_info);
+	vk_check(result)!;
+
+	char[] mapped_region;
+	if (vma_info.mapped_data != null) {
+		mapped_region = ((char*)vma_info.mapped_data)[:desc.size];
+	}
+	return {
+		.cookie = next_cookie(),
+		.mapped_region = mapped_region,
+		.backend.vk = { .buffer = buffer, .allocation = allocation, .size = (ulong)desc.size },
+	};
+}
+
+fn void buffer_deinit_vk(Buffer* b, Device* device)
+{
+	if (b.backend.vk.allocation != null) {
+		vma::destroy_buffer(device.backend.vk.vma_allocator, b.backend.vk.buffer, b.backend.vk.allocation);
+	}
+	b.backend.vk = {};
+}
+
+// These helpers are dispatched by the front buffer API. The VMA mapping is
+// already the authoritative host region, and VMA handles the allocation's
+// coherency policy for this backend.
+fn void buffer_write_vk(Buffer* b, Device* device, sz offset, char[] bytes)
+{
+	(void)device;
+	if (b.mapped_region.ptr == null)
+	{
+		abort("buffer_write: buffer has no host mapping (create it with persistent_map)");
+	}
+	sz region_len = (sz)b.mapped_region.len;
+	if (offset < 0 || offset > region_len || (sz)bytes.len > region_len - offset) {
+		abort("buffer_write: range is outside the buffer");
+	}
+	b.mapped_region[offset : bytes.len] = bytes[..];
+}
+
+fn MappedMemoryRange? buffer_get_mapped_region_vk(Buffer* b, sz offset, sz size)
+{
+	if (b.mapped_region.ptr == null) return BUFFER_NOT_MAPPED~;
+	sz region_len = (sz)b.mapped_region.len;
+	if (offset < 0 || size < 0 || offset > region_len || size > region_len - offset) {
+		return UNSUPPORTED_FEATURE~;
+	}
+	return { .offset = offset, .buffer = b, .memory_range = b.mapped_region[offset : size] };
+}
+
+fn void buffer_flush_vk(Buffer* b, Device* device)
+{
+	(void)b;
+	(void)device;
+}

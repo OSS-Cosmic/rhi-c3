@@ -1,8 +1,8 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// JS half of the rhi-odin WebGPU backend, plus the standalone C3 browser boot
-// path. The `wgpu` and `webgl` imports are plain wasm imports; no Odin runtime
+// JS half of the rhi WebGPU backend, plus the standalone C3 browser boot
+// path. The `wgpu` and `webgl` imports are plain wasm imports; no external runtime
 // or application framework is required.
 //
 // Contract with the C3 side:

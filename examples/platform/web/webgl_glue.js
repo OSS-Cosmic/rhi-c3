@@ -1,7 +1,7 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 //
-// JS half of the rhi-odin WebGL2 backend. `c3/src/rhi/webgl.c3` declares the
+// JS half of the rhi WebGL2 backend. `c3/src/rhi/webgl.c3` declares the
 // imports; this file implements them against a `webgl2` canvas context.
 //
 // This backend is the *fallback* under WebGPU: WebGL2 needs no browser flags,

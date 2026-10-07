@@ -1,11 +1,9 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// Vulkan renderer and format-mapping tests. Port of the `---- renderer ----`
-// section of rhi/vulkan_test.odin.
+// Vulkan renderer and format-mapping tests. Renderer section.
 //
-// Odin guards the global `renderer` with `gpu_test_lock` because its test
-// runner runs tests on several threads. C3's runner (std::core::runtime_test
+// The global `renderer` needs no lock: C3's runner (std::core::runtime_test
 // `run_tests`) runs every @test one after another in a plain `foreach` on the
 // main thread, so no lock is needed.
 module rhi @feat(RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
@@ -43,8 +41,8 @@ fn void format_mapping_round_trips() @test
 	}
 }
 
-// ---- sync (was vulkan_sync_test.odin) ----
-// Validation is enabled here (Odin's tests leave it off) so a validation
+// ---- sync  ----
+// Validation is enabled here so a validation
 // error during the test fails it through `vk_validation_error_count`. Without
 // the Khronos layer installed the renderer simply comes up without it.
 
@@ -96,8 +94,7 @@ fn void timeline_fence_semaphore_vk() @test
 	renderer_deinit();
 }
 
-// Odin records an empty `cmd_begin`/`cmd_end` command buffer per submit; the
-// cmd port has not landed, so both submits carry zero command buffers. The
+// The cmd port has not landed, so both submits carry zero command buffers. The
 // timeline wait/signal chain is the same.
 fn void queue_submit_timeline_chain_vk() @test
 {
@@ -136,8 +133,8 @@ fn void queue_submit_timeline_chain_vk() @test
 	renderer_deinit();
 }
 
-// ---- device (was vulkan_device_test.odin) ----
-// Validation is enabled here too (Odin leaves it off), so vkCreateDevice and
+// ---- device  ----
+// Validation is enabled here too, so vkCreateDevice and
 // the feature chains are checked through `vk_validation_error_count`.
 
 fn void device_init_deinit_vk() @test
@@ -170,8 +167,8 @@ fn void device_init_deinit_vk() @test
 	renderer_deinit();
 }
 
-// ---- physical_adapter (was vulkan_physical_adapter_test.odin) ----
-// Odin's `test_enumerate_adapters_vk`; without the prefix it would clash with
+// ---- physical_adapter  ----
+// `test_enumerate_adapters_vk`; without the prefix it would clash with
 // enumerate_adapters_vk itself, which lives in the same module.
 
 fn void enumerate_adapters_vk_test() @test

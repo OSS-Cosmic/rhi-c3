@@ -1,8 +1,7 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// Vulkan rpi allocator and Program tests ported from the approved section of
-// rhi/vulkan_test.odin.  The RPI Vulkan implementation is staged separately;
+// Vulkan rpi allocator and Program tests The RPI Vulkan implementation is staged separately;
 // these tests intentionally name the C3 RPI types and entry points that the
 // implementation ticket supplies.
 module rhi @feat(RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
@@ -11,8 +10,8 @@ import std::collections::list;
 import std::core::test;
 import vk;
 
-const char[*] RPI_TEST_FULLSCREEN_VERT_SPV @align(4) = $embed("../../../rhi/testdata/fullscreen.vert.spv");
-const char[*] RPI_TEST_MANDELBROT_FRAG_SPV @align(4) = $embed("../../../rhi/testdata/mandelbrot.frag.spv");
+const char[*] RPI_TEST_FULLSCREEN_VERT_SPV @align(4) = $embed("testdata/fullscreen.vert.spv");
+const char[*] RPI_TEST_MANDELBROT_FRAG_SPV @align(4) = $embed("testdata/mandelbrot.frag.spv");
 
 fn vk::DescriptorSetLayout? rpi_test_descriptor_set_layout(Device* device)
 {

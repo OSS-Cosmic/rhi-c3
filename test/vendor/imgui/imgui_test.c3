@@ -7,10 +7,10 @@ import std::core::test;
 alias CreateContextFn = fn Context(FontAtlas*);
 alias DestroyContextFn = fn void(Context);
 
-// These values are measured from the pinned C++ headers with the same
-// C++17/no-obsolete-functions build used by c3/build.py imgui. They mirror
-// vendor/imgui/imgui_test.odin and intentionally catch a changed generated
-// dear-bindings ABI or an incorrect ImGui build define.
+// These values are measured from vendor/imgui_c/imgui at 1.93.0 WIP with the same
+// C++17 flags used by meson.build. They mirror the vendor/imgui_c shim and
+// intentionally catch a changed upstream ImGui ABI or an incorrect ImGui
+// build define.
 fn void layout() @test
 {
 	@check_size(DrawVert, 20);
@@ -25,16 +25,18 @@ fn void layout() @test
 	@check_size(TextureRef, 16);
 	@check_size(StoragePair, 16);
 
-	@check_size(ImGuiIO, 3096);
+	@check_size(ImGuiIO, 3048);
 	@check_offset(ImGuiIO, backend_flags, 4);
 	@check_offset(ImGuiIO, display_size, 8);
 	@check_offset(ImGuiIO, fonts, 56);
 	@check_offset(ImGuiIO, mouse_pos, 232);
-	@check_offset(ImGuiIO, input_queue_characters, 3048);
-	@check_offset(ImGuiIO, font_global_scale, 3064);
-	@check_offset(ImGuiIO, get_clipboard_text_fn, 3072);
+	@check_offset(ImGuiIO, input_queue_characters, 3000);
+	@check_offset(ImGuiIO, font_global_scale, 3016);
+	@check_offset(ImGuiIO, get_clipboard_text_fn, 3024);
+	@check_offset(ImGuiIO, set_clipboard_text_fn, 3032);
+	@check_offset(ImGuiIO, clipboard_user_data, 3040);
 
-	@check_size(ImGuiStyle, 1356);
+	@check_size(ImGuiStyle, 1332);
 
 	@check_size(DrawCmd, 72);
 	@check_offset(DrawCmd, clip_rect, 0);
@@ -48,11 +50,13 @@ fn void layout() @test
 	@check_offset(DrawList, cmd_buffer, 0);
 	@check_offset(DrawList, vtx_buffer, 32);
 
-	@check_size(DrawData, 72);
-	@check_offset(DrawData, cmd_lists_count, 4);
+	@check_size(DrawData, 80);
+	@check_offset(DrawData, total_idx_count, 8);
 	@check_offset(DrawData, total_vtx_count, 12);
 	@check_offset(DrawData, cmd_lists, 16);
 	@check_offset(DrawData, display_size, 40);
+	@check_offset(DrawData, textures, 64);
+	@check_offset(DrawData, cmd_lists_count, 72);
 
 	@check_size(FontAtlas, 760);
 	@check_offset(FontAtlas, tex_ref, 40);

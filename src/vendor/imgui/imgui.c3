@@ -1,9 +1,10 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// Minimal C3 declarations for the pinned Dear ImGui/dear-bindings build in
-// vendor/imgui.  These are C ABI declarations; the implementation is the
-// real libimgui.a produced by c3/build.py imgui.
+// Minimal C3 declarations for the Dear ImGui submodule (vendor/imgui_c/imgui) and the
+// hand-written extern "C" shim in vendor/imgui_c.  These are C ABI
+// declarations; the implementation is the real libimgui.a produced by
+// `meson compile -C build-meson` and staged to vendor/imgui_c/lib/.
 module imgui;
 
 typedef Context @constinit = inline void*;
@@ -65,7 +66,7 @@ struct ImGuiIO
 	FontAtlas* fonts;
 	char[168] _before_mouse_pos;
 	Vec2 mouse_pos;
-	char[2808] _before_input_queue_characters;
+	char[2760] _before_input_queue_characters;
 	VectorWchar input_queue_characters;
 	float font_global_scale;
 	GetClipboardTextFn get_clipboard_text_fn;
@@ -77,7 +78,7 @@ struct ImGuiIO
 // the ABI test, while callers use the Dear ImGui setter functions below.
 struct ImGuiStyle
 {
-	char[1356] _abi;
+	char[1332] _abi;
 }
 
 struct DrawVert
@@ -139,7 +140,7 @@ struct VectorDrawListPtr
 struct DrawData
 {
 	bool valid;
-	int cmd_lists_count;
+	int frame_count;
 	int total_idx_count;
 	int total_vtx_count;
 	VectorDrawListPtr cmd_lists;
@@ -148,6 +149,7 @@ struct DrawData
 	Vec2 framebuffer_scale;
 	Viewport owner_viewport;
 	void* textures;
+	int cmd_lists_count;
 }
 
 struct FontAtlasRect

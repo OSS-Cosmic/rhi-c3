@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 // A fullscreen triangle whose vertex positions come from SV_VertexID.  This
-// is the C3 rendering half of examples/01_shader/main.odin.  The shared
+// is the C3 example.  The shared
 // platform::App lifecycle owns the window and event loop.
 //
-// The shader manifest is compiled by build.py before this source is checked.
+// The shader manifest is compiled by the example runner/shader tooling before this source is checked.
 // Vulkan consumes SPIR-V with the generated "main" entry point; Metal
 // consumes the generated MSL source and the original vertexMain/fragmentMain
 // entry points.  The command recording below does not branch on the backend.

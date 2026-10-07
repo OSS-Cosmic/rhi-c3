@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 // Vulkan ImGui renderer. This file is deliberately behind RHI_IMGUI: the
-// dear_bindings C ABI is an optional application dependency and must not make
+// vendor/imgui_c shim is an optional application dependency and must not make
 // the regular RHI (or its other backends) require libimgui.
 module rhi @feat(RHI_IMGUI & RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
 
@@ -17,12 +17,15 @@ const uint IMGUI_DRAW_VERT_STRIDE = 20;
 const uint IMGUI_DRAW_IDX_STRIDE = 2;
 const uint IMGUI_BACKEND_FLAGS_RENDERER_HAS_VTX_OFFSET = 1 << 3;
 
-const char[*] IMGUI_VERT_SPV @align(4) = $embed("../../../rhi/imgui/imgui.vert.spv");
-const char[*] IMGUI_FRAG_SPV @align(4) = $embed("../../../rhi/imgui/imgui.frag.spv");
+// SPIR-V blobs are generated from examples/assets/imgui.slang (slangc -target
+// spirv, per examples/03_imgui/shaders.txt), or copy them from
+// build/examples/03_imgui/shaders after `./build.py shaders/examples build`.
+const char[*] IMGUI_VERT_SPV @align(4) = $embed("shaders/imgui.vert.spv");
+const char[*] IMGUI_FRAG_SPV @align(4) = $embed("shaders/imgui.frag.spv");
 
 // The C API exposes ImGui's public structs directly. Keep only the fields the
-// renderer reads, with padding that preserves the v1.92.8 ABI. The offsets
-// are checked by vendor/imgui/imgui_test.odin.
+// renderer reads, with padding that preserves the vendor/imgui_c/imgui 1.93.0 WIP ABI. The offsets
+// are checked by test/vendor/imgui/imgui_test.c3.
 struct ImguiVec2 { float x; float y; }
 struct ImguiVec4 { float x; float y; float z; float w; }
 
@@ -145,7 +148,7 @@ struct ImguiDrawData
 
 bool valid;
 
-int cmd_lists_count;
+int frame_count;
 
 int total_idx_count;
 
@@ -161,10 +164,12 @@ ImguiVec2 framebuffer_scale;
 
 // OwnerViewport and Textures in ImGui's DrawData ABI.
 char[16] _rest;
+
+int cmd_lists_count;
 }
 
-// The names and signatures match vendor/imgui/odin-imgui's dear_bindings C
-// wrapper. No renderer stub is supplied when RHI_IMGUI is absent.
+// The names and signatures match the vendor/imgui_c shim (dear_bindings-style
+// C names). No renderer stub is supplied when RHI_IMGUI is absent.
 extern fn void* imgui_create_context(void* shared_font_atlas) @cname("ImGui_CreateContext");
 extern fn void imgui_destroy_context(void* ctx) @cname("ImGui_DestroyContext");
 extern fn void imgui_set_current_context(void* ctx) @cname("ImGui_SetCurrentContext");

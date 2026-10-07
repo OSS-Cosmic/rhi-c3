@@ -71,7 +71,7 @@ fn void mtl_swapchain_sdl_present_and_recreate() @test
 	}
 	defer sdl3::quit();
 
-	sdl3::Window window = sdl3::create_window("rhi-odin Metal swapchain", 64, 64,
+	sdl3::Window window = sdl3::create_window("rhi Metal swapchain", 64, 64,
 		sdl3::SDL_WINDOW_HIDDEN | sdl3::SDL_WINDOW_METAL);
 	if (window == null)
 	{

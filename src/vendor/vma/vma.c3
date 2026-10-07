@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 // C3 bindings for AMD's Vulkan Memory Allocator (VMA) v3.3.0, ported from
-// vendor/vma/vma.odin. The matching header and implementation are vendored
+// the VMA C API. The matching header and implementation are vendored
 // locally in c3/vendor/vma/include/vk_mem_alloc.h and
 // c3/vendor/vma/vma_impl.cpp.
 //
@@ -39,8 +39,7 @@ constdef MemoryUsage : int
 	AUTO_PREFER_HOST     = 9,
 }
 
-// VmaAllocatorCreateFlagBits. The constants are the C bit masks; the Odin
-// binding's enum stored bit *indices* (for bit_set) instead.
+// VmaAllocatorCreateFlagBits. The constants are the C bit masks.
 typedef AllocatorCreateFlags @constinit = uint;
 alias AllocatorCreateFlagBits = AllocatorCreateFlags;
 const AllocatorCreateFlags ALLOCATOR_CREATE_AMD_DEVICE_COHERENT_MEMORY_BIT = 0x00000010;
@@ -133,8 +132,7 @@ struct AllocationInfo
 	ZString name;
 }
 
-// Build it locally with `./build.py vma` from c3/ (or `python3 c3/build.py vma`
-// from any directory).
+// Build it locally with `meson compile -C build-meson` from the repository root.
 // Then `c3c test -z -lSDL3` links libvma.a and the C++ runtime.
 extern fn vk::Result create_allocator(AllocatorCreateInfo* create_info, Allocator* allocator) @cname("vmaCreateAllocator");
 extern fn void destroy_allocator(Allocator allocator) @cname("vmaDestroyAllocator");

@@ -16,7 +16,7 @@ struct TimeKeeper
 {
 	ulong tocks_per_s;
 	ulong accumulated_ticks;
-	// Odin's `Maybe(u64)`: `previous_timestamp` is valid only if `has_previous`.
+	// Optional u64: `previous_timestamp` is valid only if `has_previous`.
 	ulong previous_timestamp;
 	bool has_previous;
 }

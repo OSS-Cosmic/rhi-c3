@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 // Vulkan helpers: default device extensions, pNext chaining, aspect and
-// format mapping, and `vk::Result` to fault conversion. Port of the
-// `---- helpers ----` section of rhi/vulkan.odin.
+// format mapping, and `vk::Result` to fault conversion.
 module rhi @feat(RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
 import vk;
 
@@ -86,7 +85,7 @@ fn bool vk_has_extension(vk::ExtensionProperties[] props, String name)
 	return false;
 }
 
-// Odin's parapoly `vk_add_next(current: ^$T1, next: ^$T2)`: splices `next`
+// Splices `next`
 // into `current`'s pNext chain right after `current`.
 <*
  @require @kindof(current) == POINTER && @kindof(next) == POINTER

@@ -1,8 +1,7 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// A checkerboard texture and alpha-blended quad.  This is the C3 rendering
-// half of examples/05_texture/main.odin and uses the shared native
+// A checkerboard texture and alpha-blended quad.  Uses the shared native
 // platform::App lifecycle.
 module texture_example;
 
@@ -14,7 +13,7 @@ const int FRAMES_IN_FLIGHT = 3;
 const uint TEX_SIZE = 8;
 const rhi::Format TEX_FORMAT = rhi::Format.RGBA8_UNORM;
 
-// build.py compiles the manifest into these files before checking or building
+// The example runner/shader tooling compiles the manifest into these files before checking or building
 // the example.  Vulkan consumes SPIR-V and Metal consumes generated MSL; do
 // not embed the checked-in shader source files here.
 const char[*] TEXTURE_VERTEX_SPV @align(4) = $embed("../../build/examples/05_texture/shaders/05_texture.vert.spv");

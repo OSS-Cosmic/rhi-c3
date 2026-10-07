@@ -1,7 +1,7 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// Vulkan command tests ported from rhi/vulkan_test.odin.  The command
+// Vulkan command tests  The command
 // back-end is intentionally not hidden behind a feature probe here: these
 // tests are the probe, and pending command implementations fail with the
 // backend's normal UNSUPPORTED_FEATURE result until their ticket lands.
@@ -10,8 +10,8 @@ import std::core::test;
 import std::collections::list;
 import vk;
 
-const char[*] VK_CMD_FULLSCREEN_VERT_SPV @align(4) = $embed("../../../rhi/testdata/fullscreen.vert.spv");
-const char[*] VK_CMD_MANDELBROT_FRAG_SPV @align(4) = $embed("../../../rhi/testdata/mandelbrot.frag.spv");
+const char[*] VK_CMD_FULLSCREEN_VERT_SPV @align(4) = $embed("testdata/fullscreen.vert.spv");
+const char[*] VK_CMD_MANDELBROT_FRAG_SPV @align(4) = $embed("testdata/mandelbrot.frag.spv");
 
 macro @with_vk_cmd_device(;@body(Device* device))
 {
@@ -25,7 +25,7 @@ macro @with_vk_cmd_device(;@body(Device* device))
 	@body(&device);
 }
 
-// Keep the Odin assertions on the production Vulkan conversion helpers.  They
+// Keep these assertions on the production Vulkan conversion helpers.  They
 // are private implementation helpers, but tests share the rhi module and can
 // exercise them without changing the public API.
 

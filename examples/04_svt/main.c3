@@ -1,12 +1,12 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// 04_svt: software virtual texturing, ported from examples/04_svt/main.odin.
+// 04_svt: software virtual texturing.
 //
 // This example is intentionally Vulkan-only.  It is the first C3 example that
 // uses rhi::Program directly: descriptor bindings are declared and resolved by
 // name for the feedback and composite pipelines.  ImGui rendering is supplied
-// by the existing RHI_IMGUI layer and widget calls use the dear_bindings ABI.
+// by the existing RHI_IMGUI layer and widget calls use the vendor/imgui_c shim ABI.
 module example_04_svt @feat(RHI_VK & RHI_IMGUI & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
 
 import std::collections::list;
@@ -113,7 +113,7 @@ fn Page page_decode(PageIndexer* indexer, uint index)
 }
 
 // A direct page-index table avoids a hash allocation in the hot path.  It is
-// the same page -> slot cache as the Odin map, with the LRU metadata kept in
+// the same page -> slot cache as a map, with the LRU metadata kept in
 // the atlas-slot arrays.  Coarse pages are pinned to guarantee fallbacks.
 struct PageCache
 {
@@ -205,7 +205,7 @@ fn void procedural_tile(Page page, char[] bytes)
 }
 
 // Small column-major matrix helpers.  Keeping them local makes the example
-// independent of a matrix package and preserves the Odin shader ABI exactly.
+// independent of a matrix package and preserves the shader ABI exactly.
 fn void mat4_identity(float[16]* m)
 {
 	*m = {};
@@ -468,7 +468,7 @@ fn void? init_resources() @private
 fn void svt_draw_imgui()
 {
 	// ImGui statistics and controls: the ticket's C3 binding supplies these
-	// calls.  Keeping all statistics here mirrors draw_ui in the Odin source.
+	// calls.  Keeping all statistics here lives in one place.
 	bool visible = imgui::begin("04-svt virtual texturing", null, 0);
 	if (visible)
 	{

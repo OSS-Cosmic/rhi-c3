@@ -1,8 +1,7 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// Vulkan resource tests. Port of the resource portions of
-// rhi/vulkan_test.odin. The command pool/copy front is not ported yet, so the
+// Vulkan resource tests. Resource portions. The command pool/copy front is not ported yet, so the
 // image upload test checks the synchronous upload path and its validation
 // result; buffer/image/sampler/descriptor handles are checked directly.
 module rhi @feat(RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
@@ -12,8 +11,8 @@ import vk;
 
 // The Vulkan shader module API consumes a uint pointer. Keep the embedded
 // blobs word-aligned even though $embed itself produces a byte array.
-const char[*] FULLSCREEN_VERT_SPV @align(4) = $embed("../../../rhi/testdata/fullscreen.vert.spv");
-const char[*] MANDELBROT_FRAG_SPV @align(4) = $embed("../../../rhi/testdata/mandelbrot.frag.spv");
+const char[*] FULLSCREEN_VERT_SPV @align(4) = $embed("testdata/fullscreen.vert.spv");
+const char[*] MANDELBROT_FRAG_SPV @align(4) = $embed("testdata/mandelbrot.frag.spv");
 
 macro @with_vk_resource_device(;@body(Device* device))
 {

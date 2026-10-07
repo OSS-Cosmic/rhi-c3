@@ -21,7 +21,7 @@ enum Backend : char
 	WEBGL,
 }
 
-// Odin's `bit_set[Backend; u8]`: bit `1 << Backend.X.ordinal` per backend.
+// Backend bit set: bit `1 << Backend.X.ordinal` per backend.
 alias BackendSet = char;
 
 const BackendSet BACKEND_VK = 1 << Backend.VK.ordinal;
@@ -83,8 +83,7 @@ fn bool platform_has_api(Backend api) @inline
 // `GLUE_ABI_VERSION` in the glue to match.
 const GLUE_ABI_VERSION = 5;
 
-// Odin's `General_Error` enum. Odin's `Error` union (General_Error,
-// Pipeline_Error, runtime.Allocator_Error) collapses into C3's single fault
+// General faults. The general, pipeline and allocator errors collapse into C3's single fault
 // space: these faults, the allocator's faults, and Pipeline_Error's faults
 // (declared below) all travel through `T?` returns.
 faultdef
@@ -99,8 +98,7 @@ faultdef
 	BUFFER_NOT_MAPPED,
 	UNKNOWN;
 
-// Odin's `Pipeline_Error` enum (from pipeline.odin; its `None` is the absence
-// of a fault).
+// Pipeline faults.
 faultdef
 	SHADER_COMPILATION_FAILED,
 	UNSUPPORTED_SHADER_STAGE,
