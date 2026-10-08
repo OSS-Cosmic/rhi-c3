@@ -6,8 +6,7 @@
 Usage: python3 c3/tools/gen_vulkan.py [path/to/vk.xml]
 
 Writes c3/src/vendor/vulkan/{core,enums,structs,procedures}.c3. The output
-mirrors Odin's vendor:vulkan (vendor/vulkan/_gen/create_vulkan_odin_wrapper.py)
-so code written against Odin's `vk.X` ports mechanically to `vk::X`. The
+maps the C API mechanically (`VkX` / `vkX`) to `vk::X`. The
 conventions are documented in the header of core.c3 and in c3/README.md.
 
 Only the `vulkan` API is emitted. Skipped: vulkansc-only items, video
@@ -459,7 +458,7 @@ class Gen:
                 short = short[len(prefix):]
                 if short[0].isdigit():
                     if len(short) > 1 and short[1] == "D":
-                        short = short[1] + short[0] + short[2:]  # IMAGE_TYPE_2D -> D2 (as Odin)
+                        short = short[1] + short[0] + short[2:]  # IMAGE_TYPE_2D -> D2
                     else:
                         short = prefix_words[-1] + "_" + short
             if suffix and short.endswith(suffix) and short != suffix[1:]:
@@ -807,7 +806,7 @@ class Gen:
 
 
 CONVENTIONS = """\
-// Conventions (Odin vendor:vulkan `vk.X` -> C3 `vk::X`):
+// Conventions (C bindings `vk.X` -> C3 `vk::X`):
 //
 // - Names drop the Vk/vk/VK_ prefix: `vk::Instance`, `vk::ImageCreateInfo`,
 //   `vk::KHR_SWAPCHAIN_EXTENSION_NAME` (ZString), `vk::WHOLE_SIZE`.
@@ -815,7 +814,7 @@ CONVENTIONS = """\
 //   (distinct, compare with null); non-dispatchable handles are
 //   `typedef Image @constinit = ulong;` (distinct, compare with 0 / NULL_HANDLE).
 // - Enums are `constdef X : int` with explicit values; members drop the type
-//   prefix and the type's vendor suffix like Odin: `vk::Format.R8G8B8A8_UNORM`
+//   prefix and the type's vendor suffix: `vk::Format.R8G8B8A8_UNORM`
 //   (or just `R8G8B8A8_UNORM` where a Format is expected),
 //   `vk::Result.ERROR_OUT_OF_DATE_KHR`, `vk::ColorSpaceKHR.SRGB_NONLINEAR`.
 //   Members that would start with a digit become `D2`/`D3` (`ImageType.D2`)
@@ -833,16 +832,17 @@ CONVENTIONS = """\
 //   be set by hand. C bitfields become anonymous bitstructs (fields stay
 //   directly accessible). `const char*` is ZString, fixed arrays use the API
 //   constants (`char[MAX_EXTENSION_NAME_SIZE]`).
-// - Procedure types keep Odin's names: `ProcCreateInstance`,
+// - Procedure types keep the C names: `ProcCreateInstance`,
 //   `ProcGetDeviceProcAddr`, `ProcVoidFunction`, `ProcDebugUtilsMessengerCallbackEXT`.
 // - C3 variables and fields must start lowercase, so the global procedure
 //   pointers and DeviceVTable fields are the command name minus `vk` with the
-//   first letter lowercased: Odin `vk.CreateInstance(...)` is
+//   first letter lowercased: `vk.CreateInstance(...)` is
 //   `vk::createInstance(...)`, `vtable.CmdDraw` is `vtable.cmdDraw`.
-// - Loading as in Odin: load_proc_addresses_global(vkGetInstanceProcAddr),
+// - Loading: load_proc_addresses_global(vkGetInstanceProcAddr),
 //   load_proc_addresses_instance(instance), load_proc_addresses_device(device),
-//   load_proc_addresses_device_vtable(device, &vtable). Nothing links libvulkan.
-// - Odin's MAKE_API_VERSION/VERSION_MAJOR/... are the macros
+//   load_proc_addresses_device_vtable(device, &vtable). Nothing links libvulkan;
+//   volk (vendor/volk) opens the loader library and supplies vkGetInstanceProcAddr.
+// - MAKE_API_VERSION/VERSION_MAJOR/... are the macros
 //   `vk::@make_api_version(0, 1, 3, 0)`, `vk::@api_version_major(v)`, ...
 //   which fold to constants when given constants.
 // - Platform types: XlibDisplay (opaque), XlibWindow, XlibVisualID, RROutput,
