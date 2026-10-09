@@ -24,6 +24,10 @@ struct Descriptor
 	ulong handle;
 	ulong offset;
 	ulong range;
+	// Sampled images only: Vulkan reads the image in DEPTH_READ_ONLY_OPTIMAL
+	// instead of SHADER_READ_ONLY_OPTIMAL, for depth that is also bound as a
+	// read-only depth attachment in the same pass.
+	bool depth_read_only;
 }
 
 // Stable identity for a named descriptor binding. The hash is what the binders
@@ -211,6 +215,17 @@ fn Descriptor descriptor_image(ImageView* v, DescriptorType kind)
 fn Descriptor descriptor_sampled_image(ImageView* v)
 {
 	return descriptor_image(v, SAMPLED_IMAGE);
+}
+
+// Sampled depth image that stays in the read-only depth layout, so the same
+// view can also be the pass's read-only depth attachment.
+fn Descriptor descriptor_sampled_depth_read_only(ImageView* v)
+{
+	Descriptor d = descriptor_image(v, SAMPLED_IMAGE);
+	if (d.cookie == 0) return d;
+	d.depth_read_only = true;
+	d.cookie = descriptor_cookie(v.cookie, SAMPLED_IMAGE, 1, 0);
+	return d;
 }
 
 // Read/write storage image.

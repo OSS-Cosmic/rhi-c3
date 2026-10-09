@@ -838,7 +838,7 @@ fn void? program_bind_descriptors_vk(Program* p, Device* device, Cmd* cmd, uint 
 						buffer_infos[n] = { .buffer = (vk::Buffer)d.handle, .offset = (vk::DeviceSize)d.offset, .range = (vk::DeviceSize)d.range };
 						writes[n].pBufferInfo = &buffer_infos[n];
 					case SAMPLED_IMAGE:
-						image_infos[n] = { .imageView = (vk::ImageView)d.handle, .imageLayout = vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL };
+						image_infos[n] = { .imageView = (vk::ImageView)d.handle, .imageLayout = d.depth_read_only ? vk::ImageLayout.DEPTH_READ_ONLY_OPTIMAL : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL };
 						writes[n].pImageInfo = &image_infos[n];
 					case STORAGE_IMAGE:
 						image_infos[n] = { .imageView = (vk::ImageView)d.handle, .imageLayout = vk::ImageLayout.GENERAL };
