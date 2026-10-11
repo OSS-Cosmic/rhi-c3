@@ -341,26 +341,26 @@ struct QueueVk
 
 fn void? queue_wait_idle_vk(Queue* q, Device* device)
 {
-	return vk_check(device.backend.vk.vtable.queueWaitIdle(q.backend.vk.queue));
+	return vk_check(vk::vkQueueWaitIdle(q.backend.vk.queue));
 }
 
 // Submit-time stage scope for a timeline op. Unlike barriers there is no
 // resource state to derive from, so an empty set means all commands.
 fn vk::PipelineStageFlags2 vk_submit_stage_mask(BarrierStages stages)
 {
-	if ((ushort)stages == 0) return vk::PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+	if ((ushort)stages == 0) return vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
 	vk::PipelineStageFlags2 flags;
-	if (stages.vertex) flags |= vk::PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
-	if (stages.fragment) flags |= vk::PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-	if (stages.compute) flags |= vk::PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-	if (stages.ray_tracing) flags |= vk::PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
-	if (stages.draw_indirect) flags |= vk::PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-	if (stages.copy) flags |= vk::PIPELINE_STAGE_2_COPY_BIT;
-	if (stages.blit) flags |= vk::PIPELINE_STAGE_2_BLIT_BIT;
-	if (stages.clear) flags |= vk::PIPELINE_STAGE_2_CLEAR_BIT;
-	if (stages.accel_build) flags |= vk::PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
-	if (stages.color_attachment) flags |= vk::PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-	if (stages.host) flags |= vk::PIPELINE_STAGE_2_HOST_BIT;
+	if (stages.vertex) flags |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+	if (stages.fragment) flags |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+	if (stages.compute) flags |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+	if (stages.ray_tracing) flags |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+	if (stages.draw_indirect) flags |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+	if (stages.copy) flags |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COPY_BIT;
+	if (stages.blit) flags |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_BLIT_BIT;
+	if (stages.clear) flags |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_CLEAR_BIT;
+	if (stages.accel_build) flags |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+	if (stages.color_attachment) flags |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+	if (stages.host) flags |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_HOST_BIT;
 	return flags;
 }
 
@@ -368,19 +368,18 @@ fn vk::PipelineStageFlags2 vk_submit_stage_mask(BarrierStages stages)
 // submit when `desc.completion` carries no fence. The caller resets it.
 fn void? queue_submit_vk(Queue* q, Device* device, QueueSubmitDesc desc, vk::Fence fallback_fence = (vk::Fence)0) => @pool()
 {
-	vk::DeviceVTable* vtable = &device.backend.vk.vtable;
 
 	vk::CommandBufferSubmitInfo[] cbs = mem::temp_array(vk::CommandBufferSubmitInfo, desc.cmds.len);
 	foreach (i, c : desc.cmds)
 	{
-		cbs[i] = { .sType = COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = c.backend.vk.cmd };
+		cbs[i] = { .sType = vk::StructureType.STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = c.backend.vk.cmd };
 	}
 
 	vk::SemaphoreSubmitInfo[] waits = mem::temp_array(vk::SemaphoreSubmitInfo, desc.waits.len + desc.binary_waits.len);
 	foreach (i, op : desc.waits)
 	{
 		waits[i] = {
-			.sType = SEMAPHORE_SUBMIT_INFO,
+			.sType = vk::StructureType.STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.semaphore = op.timeline.backend.vk.semaphore,
 			.value = op.value,
 			.stageMask = vk_submit_stage_mask(op.stages),
@@ -390,7 +389,7 @@ fn void? queue_submit_vk(Queue* q, Device* device, QueueSubmitDesc desc, vk::Fen
 	{
 		BarrierStages stages = i < desc.binary_wait_stages.len ? desc.binary_wait_stages[i] : {};
 		waits[desc.waits.len + i] = {
-			.sType = SEMAPHORE_SUBMIT_INFO,
+			.sType = vk::StructureType.STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.semaphore = s.backend.vk.semaphore,
 			.stageMask = vk_submit_stage_mask(stages),
 		};
@@ -400,7 +399,7 @@ fn void? queue_submit_vk(Queue* q, Device* device, QueueSubmitDesc desc, vk::Fen
 	foreach (i, op : desc.signals)
 	{
 		signals[i] = {
-			.sType = SEMAPHORE_SUBMIT_INFO,
+			.sType = vk::StructureType.STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.semaphore = op.timeline.backend.vk.semaphore,
 			.value = op.value,
 			.stageMask = vk_submit_stage_mask(op.stages),
@@ -409,14 +408,14 @@ fn void? queue_submit_vk(Queue* q, Device* device, QueueSubmitDesc desc, vk::Fen
 	foreach (i, s : desc.binary_signals)
 	{
 		signals[desc.signals.len + i] = {
-			.sType = SEMAPHORE_SUBMIT_INFO,
+			.sType = vk::StructureType.STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO,
 			.semaphore = s.backend.vk.semaphore,
-			.stageMask = vk::PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+			.stageMask = vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
 		};
 	}
 
 	vk::SubmitInfo2 submit_info = {
-		.sType = SUBMIT_INFO_2,
+		.sType = vk::StructureType.STRUCTURE_TYPE_SUBMIT_INFO_2,
 		.waitSemaphoreInfoCount = (uint)waits.len,
 		.pWaitSemaphoreInfos = waits.len > 0 ? waits.ptr : null,
 		.commandBufferInfoCount = (uint)cbs.len,
@@ -431,7 +430,7 @@ fn void? queue_submit_vk(Queue* q, Device* device, QueueSubmitDesc desc, vk::Fen
 	if (desc.completion && desc.completion.backend.vk.fence != (vk::Fence)0)
 	{
 		fence = desc.completion.backend.vk.fence;
-		vk_check(vtable.resetFences(device.backend.vk.device, 1, &fence))!;
+		vk_check(vk::vkResetFences(device.backend.vk.device, 1, &fence))!;
 	}
-	return vk_check(vtable.queueSubmit2(q.backend.vk.queue, 1, &submit_info, fence));
+	return vk_check(vk::vkQueueSubmit2(q.backend.vk.queue, 1, &submit_info, fence));
 }

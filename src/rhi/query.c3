@@ -202,12 +202,12 @@ struct QueryPoolVk
 fn QueryPool? query_pool_init_vk(Device* device, QueryPoolDesc desc)
 {
 	vk::QueryPoolCreateInfo info = {
-		.sType = vk::StructureType.QUERY_POOL_CREATE_INFO,
-		.queryType = vk::QueryType.OCCLUSION,
+		.sType = vk::StructureType.STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+		.queryType = vk::QueryType.QUERY_TYPE_OCCLUSION,
 		.queryCount = desc.query_count,
 	};
 	vk::QueryPool pool;
-	vk_check(device.backend.vk.vtable.createQueryPool(device.backend.vk.device, &info, null, &pool))!;
+	vk_check(vk::vkCreateQueryPool(device.backend.vk.device, &info, null, &pool))!;
 	return {
 		.query_count = desc.query_count,
 		// The pool itself is always host-readable on Vulkan.
@@ -221,7 +221,7 @@ fn void query_pool_deinit_vk(QueryPool* p, Device* device)
 {
 	if (p.backend.vk.pool != (vk::QueryPool)0)
 	{
-		device.backend.vk.vtable.destroyQueryPool(device.backend.vk.device, p.backend.vk.pool, null);
+		vk::destroyQueryPool(device.backend.vk.device, p.backend.vk.pool, null);
 	}
 	p.backend.vk = {};
 }
@@ -229,13 +229,13 @@ fn void query_pool_deinit_vk(QueryPool* p, Device* device)
 fn bool query_pool_get_results_vk(QueryPool* p, Device* device, uint first, uint count, ulong* results)
 {
 	// No WAIT bit: NOT_READY is a valid "try again next frame", not an error.
-	vk::Result r = device.backend.vk.vtable.getQueryPoolResults(
+	vk::Result r = vk::vkGetQueryPoolResults(
 		device.backend.vk.device, p.backend.vk.pool, first, count,
-		(usz)count * 8, results, 8, vk::QUERY_RESULT_64_BIT); // 8 = one 64-bit result
+		(usz)count * 8, results, 8, vk::QueryResultFlagBits.QUERY_RESULT_64_BIT); // 8 = one 64-bit result
 	return r == vk::Result.SUCCESS;
 }
 
 fn void cmd_reset_query_pool_vk(Cmd* c, Device* device, QueryPool* p, uint first, uint count)
 {
-	device.backend.vk.vtable.cmdResetQueryPool(c.backend.vk.cmd, p.backend.vk.pool, first, count);
+	vk::cmdResetQueryPool(c.backend.vk.cmd, p.backend.vk.pool, first, count);
 }

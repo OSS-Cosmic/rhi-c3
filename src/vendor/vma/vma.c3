@@ -11,7 +11,7 @@
 // c3/test/vendor/vma/vma_test.c3, which checks them against values obtained
 // by compiling the real header (see that file for how).
 //
-// Conventions follow c3/src/vendor/vulkan/core.c3: handles are
+// Conventions follow Vulkan.c3: handles are
 // `typedef X @constinit = inline void*;`, enums are `constdef X : int`, and
 // flags are `typedef XFlags @constinit = uint;` with one module constant per
 // bit (the C name minus VMA_).
@@ -58,37 +58,37 @@ const AllocationCreateFlags ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD
 // then, so every conditional field in the header is compiled in).
 struct VulkanFunctions
 {
-	vk::ProcGetInstanceProcAddr get_instance_proc_addr;
-	vk::ProcGetDeviceProcAddr get_device_proc_addr;
-	vk::ProcGetPhysicalDeviceProperties get_physical_device_properties;
-	vk::ProcGetPhysicalDeviceMemoryProperties get_physical_device_memory_properties;
-	vk::ProcAllocateMemory allocate_memory;
-	vk::ProcFreeMemory free_memory;
-	vk::ProcMapMemory map_memory;
-	vk::ProcUnmapMemory unmap_memory;
-	vk::ProcFlushMappedMemoryRanges flush_mapped_memory_ranges;
-	vk::ProcInvalidateMappedMemoryRanges invalidate_mapped_memory_ranges;
-	vk::ProcBindBufferMemory bind_buffer_memory;
-	vk::ProcBindImageMemory bind_image_memory;
-	vk::ProcGetBufferMemoryRequirements get_buffer_memory_requirements;
-	vk::ProcGetImageMemoryRequirements get_image_memory_requirements;
-	vk::ProcCreateBuffer create_buffer;
-	vk::ProcDestroyBuffer destroy_buffer;
-	vk::ProcCreateImage create_image;
-	vk::ProcDestroyImage destroy_image;
-	vk::ProcCmdCopyBuffer cmd_copy_buffer;
-	vk::ProcGetBufferMemoryRequirements2KHR get_buffer_memory_requirements2_khr;
-	vk::ProcGetImageMemoryRequirements2KHR get_image_memory_requirements2_khr;
-	vk::ProcBindBufferMemory2KHR bind_buffer_memory2_khr;
-	vk::ProcBindImageMemory2KHR bind_image_memory2_khr;
-	vk::ProcGetPhysicalDeviceMemoryProperties2KHR get_physical_device_memory_properties2_khr;
-	vk::ProcGetDeviceBufferMemoryRequirementsKHR get_device_buffer_memory_requirements;
-	vk::ProcGetDeviceImageMemoryRequirementsKHR get_device_image_memory_requirements;
+	vk::PFN_vkGetInstanceProcAddr get_instance_proc_addr;
+	vk::PFN_vkGetDeviceProcAddr get_device_proc_addr;
+	vk::PFN_vkGetPhysicalDeviceProperties get_physical_device_properties;
+	vk::PFN_vkGetPhysicalDeviceMemoryProperties get_physical_device_memory_properties;
+	vk::PFN_vkAllocateMemory allocate_memory;
+	vk::PFN_vkFreeMemory free_memory;
+	vk::PFN_vkMapMemory map_memory;
+	vk::PFN_vkUnmapMemory unmap_memory;
+	vk::PFN_vkFlushMappedMemoryRanges flush_mapped_memory_ranges;
+	vk::PFN_vkInvalidateMappedMemoryRanges invalidate_mapped_memory_ranges;
+	vk::PFN_vkBindBufferMemory bind_buffer_memory;
+	vk::PFN_vkBindImageMemory bind_image_memory;
+	vk::PFN_vkGetBufferMemoryRequirements get_buffer_memory_requirements;
+	vk::PFN_vkGetImageMemoryRequirements get_image_memory_requirements;
+	vk::PFN_vkCreateBuffer create_buffer;
+	vk::PFN_vkDestroyBuffer destroy_buffer;
+	vk::PFN_vkCreateImage create_image;
+	vk::PFN_vkDestroyImage destroy_image;
+	vk::PFN_vkCmdCopyBuffer cmd_copy_buffer;
+	vk::PFN_vkGetBufferMemoryRequirements2KHR get_buffer_memory_requirements2_khr;
+	vk::PFN_vkGetImageMemoryRequirements2KHR get_image_memory_requirements2_khr;
+	vk::PFN_vkBindBufferMemory2KHR bind_buffer_memory2_khr;
+	vk::PFN_vkBindImageMemory2KHR bind_image_memory2_khr;
+	vk::PFN_vkGetPhysicalDeviceMemoryProperties2KHR get_physical_device_memory_properties2_khr;
+	vk::PFN_vkGetDeviceBufferMemoryRequirementsKHR get_device_buffer_memory_requirements;
+	vk::PFN_vkGetDeviceImageMemoryRequirementsKHR get_device_image_memory_requirements;
 	// VK_KHR_external_memory_win32 is not used by this port; kept only to
 	// preserve the field's slot in the C struct layout (a `void*` in C unless
 	// VMA_EXTERNAL_MEMORY_WIN32, pointer-sized either way).
-	vk::ProcGetMemoryWin32HandleKHR get_memory_win32_handle_khr;
-	vk::ProcGetPhysicalDeviceProperties2KHR get_physical_device_properties2_khr;
+	vk::PFN_vkGetMemoryWin32HandleKHR get_memory_win32_handle_khr;
+	vk::PFN_vkGetPhysicalDeviceProperties2KHR get_physical_device_properties2_khr;
 }
 
 // VmaAllocatorCreateInfo.
@@ -104,7 +104,7 @@ struct AllocatorCreateInfo
 	VulkanFunctions* vulkan_functions;
 	vk::Instance instance;
 	uint vulkan_api_version;
-	vk::ExternalMemoryHandleTypeFlagsKHR* type_external_memory_handle_types; // const, VMA_EXTERNAL_MEMORY
+	vk::ExternalMemoryHandleTypeFlags* type_external_memory_handle_types; // const, VMA_EXTERNAL_MEMORY
 }
 
 // VmaAllocationCreateInfo.

@@ -92,7 +92,7 @@ struct RendererOptions
 	}
 }
 
-fn void? renderer_init(RendererOptions opts, Allocator allocator = mem)
+fn void? renderer_init(RendererOptions opts, alloc::Allocator allocator = mem)
 {
 	switch (opts.backend)
 	{
@@ -184,7 +184,7 @@ struct RendererMtl
 	char _unused;
 }
 
-fn void? renderer_init_mtl(RendererMtlOptions opts, Allocator allocator = mem)
+fn void? renderer_init_mtl(RendererMtlOptions opts, alloc::Allocator allocator = mem)
 {
 	renderer = {
 		.backend = MTL,
@@ -236,7 +236,7 @@ fn void? dx12_check(dxgi::HResult hr)
 	}
 }
 
-fn void? renderer_init_dx12(RendererDx12Options opts, Allocator allocator = mem)
+fn void? renderer_init_dx12(RendererDx12Options opts, alloc::Allocator allocator = mem)
 {
 	// TODO: GPU_BASED validation needs ID3D12Debug1::SetEnableGPUBasedValidation
 	// and DRED needs ID3D12DeviceRemovedExtendedDataSettings; neither is bound
@@ -293,7 +293,7 @@ fn void renderer_deinit_dx12()
 
 // ---- vulkan ----
 
-// Vulkan renderer: loads the Vulkan loader library at run time (through volk),
+// Vulkan renderer: loads the Vulkan loader library at run time through Vulkan.c3,
 // creates the instance and (with validation) a debug messenger.
 //
 // Logging uses std::core::log. The per-layer/per-extension
@@ -301,7 +301,7 @@ fn void renderer_deinit_dx12()
 // ERROR and above by default, so they stay quiet unless that category's
 // priority is lowered; `VK ERROR`/`VK WARNING` use the default category.
 module rhi @feat(RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
-import vk, volk, std::atomic;
+import vk, std::atomic;
 import std::collections::list;
 
 struct RendererVk
@@ -311,26 +311,24 @@ struct RendererVk
 	vk::DebugUtilsMessengerEXT debug_messenger;
 }
 
-fn void? renderer_init_vk(RendererVkOptions opt, Allocator allocator = mem)
+fn void? renderer_init_vk(RendererVkOptions opt, alloc::Allocator allocator = mem)
 {
-	if (volk::initialize() != vk::Result.SUCCESS)
+	if (catch err = vk::init())
 	{
-		log::error("Failed to load the Vulkan loader library");
+		(void)err;
+		log::error("Failed to initialize Vulkan loader");
 		return INITIALIZATION_FAILED~;
 	}
-	defer catch volk::finalize();
-
-	vk::load_proc_addresses_global(volk::get_instance_proc_addr());
 
 	vk::ApplicationInfo app_info = {
-		.sType = APPLICATION_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_APPLICATION_INFO,
 		.pApplicationName = opt.app_name,
-		.applicationVersion = vk::@make_api_version(0, 0, 0, 1),
-		.engineVersion = vk::@make_api_version(0, 0, 0, 1),
-		.apiVersion = vk::API_VERSION_1_3,
+		.applicationVersion = vk::@makeApiVersion(0, 0, 0, 1),
+		.engineVersion = vk::@makeApiVersion(0, 0, 0, 1),
+		.apiVersion = vk::@makeApiVersion(0, 1, 3, 0),
 	};
 
-	vk::ValidationFeatureEnableEXT[1] enabled_validation_features = { DEBUG_PRINTF };
+	vk::ValidationFeatureEnableEXT[1] enabled_validation_features = { vk::ValidationFeatureEnableEXT.VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT };
 	vk::ValidationFeaturesEXT validation_features = {
 		.sType = (vk::StructureType)1000247000,
 		.enabledValidationFeatureCount = enabled_validation_features.len,
@@ -352,9 +350,9 @@ fn void? renderer_init_vk(RendererVkOptions opt, Allocator allocator = mem)
 
 	{
 		uint layer_count;
-		vk::enumerateInstanceLayerProperties(&layer_count, null);
+		vk::vkEnumerateInstanceLayerProperties(&layer_count, null);
 		layers = mem::alloc::alloc_array_try(allocator, vk::LayerProperties, layer_count)!;
-		vk::enumerateInstanceLayerProperties(&layer_count, layers.ptr);
+		vk::vkEnumerateInstanceLayerProperties(&layer_count, layers.ptr);
 
 		foreach (&layer : layers)
 		{
@@ -367,9 +365,9 @@ fn void? renderer_init_vk(RendererVkOptions opt, Allocator allocator = mem)
 
 	{
 		uint ext_count;
-		vk::enumerateInstanceExtensionProperties(null, &ext_count, null);
+		vk::vkEnumerateInstanceExtensionProperties(null, &ext_count, null);
 		exts = mem::alloc::alloc_array_try(allocator, vk::ExtensionProperties, ext_count)!;
-		vk::enumerateInstanceExtensionProperties(null, &ext_count, exts.ptr);
+		vk::vkEnumerateInstanceExtensionProperties(null, &ext_count, exts.ptr);
 
 		foreach (&ext : exts)
 		{
@@ -377,13 +375,13 @@ fn void? renderer_init_vk(RendererVkOptions opt, Allocator allocator = mem)
 			String s = name.str_view();
 			bool use_ext = false;
 			$if env::WIN32:
-				use_ext |= s == vk::KHR_WIN32_SURFACE_EXTENSION_NAME.str_view();
+				use_ext |= s == "VK_KHR_win32_surface";
 			$else
-				use_ext |= s == vk::KHR_XLIB_SURFACE_EXTENSION_NAME.str_view() || s == vk::KHR_WAYLAND_SURFACE_EXTENSION_NAME.str_view();
+				use_ext |= s == "VK_KHR_xlib_surface" || s == "VK_KHR_wayland_surface";
 			$endif
-			use_ext |= s == vk::KHR_SURFACE_EXTENSION_NAME.str_view();
-			use_ext |= s == vk::EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME.str_view();
-			use_ext |= s == vk::EXT_DEBUG_UTILS_EXTENSION_NAME.str_view();
+			use_ext |= s == "VK_KHR_surface";
+			use_ext |= s == "VK_EXT_swapchain_color_space";
+			use_ext |= s == "VK_EXT_debug_utils";
 
 			log::info("Instance Extension: %s(%d): %s", name, ext.specVersion, use_ext ? "ENABLED" : "DISABLED", category: log::CATEGORY_RENDER);
 			if (use_ext) enabled_extension_names.push(name);
@@ -391,7 +389,7 @@ fn void? renderer_init_vk(RendererVkOptions opt, Allocator allocator = mem)
 	}
 
 	vk::InstanceCreateInfo create_info = {
-		.sType = INSTANCE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
 		.pApplicationInfo = &app_info,
 		.ppEnabledLayerNames = enabled_layer_names.len() ? (ZString)&enabled_layer_names[0] : null,
 		.enabledLayerCount = (uint)enabled_layer_names.len(),
@@ -402,24 +400,24 @@ fn void? renderer_init_vk(RendererVkOptions opt, Allocator allocator = mem)
 	if (opt.enable_validation_layer) vk_add_next(&create_info, &validation_features);
 
 	vk::Instance instance;
-	vk_check(vk::createInstance(&create_info, null, &instance))!;
+	vk_check(vk::vkCreateInstance(&create_info, null, &instance))!;
 
-	vk::load_proc_addresses_instance(instance);
+	vk::loadExtensions(instance);
 
 	vk::DebugUtilsMessengerEXT debug_messenger;
-	if (opt.enable_validation_layer && vk::createDebugUtilsMessengerEXT)
+	if (opt.enable_validation_layer && vk::extensions.vkCreateDebugUtilsMessengerEXT)
 	{
 		vk::DebugUtilsMessengerCreateInfoEXT debug_create_info = {
 			.sType = (vk::StructureType)1000128004,
-			.pfnUserCallback = &vk_debug_messenger_callback,
-			.messageSeverity = vk::DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
-				| vk::DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
-				| vk::DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-			.messageType = vk::DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
-				| vk::DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
-				| vk::DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+			.pfnUserCallback = (vk::PFN_vkDebugUtilsMessengerCallbackEXT)&vk_debug_messenger_callback,
+			.messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
+				| vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+				| vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+			.messageType = vk::DebugUtilsMessageTypeFlagBitsEXT.DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+				| vk::DebugUtilsMessageTypeFlagBitsEXT.DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+				| vk::DebugUtilsMessageTypeFlagBitsEXT.DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
 		};
-		if (catch err = vk_check(vk::createDebugUtilsMessengerEXT(instance, &debug_create_info, null, &debug_messenger)))
+		if (catch err = vk_check(vk::extensions.vkCreateDebugUtilsMessengerEXT(instance, &debug_create_info, null, &debug_messenger)))
 		{
 			vk::destroyInstance(instance, null);
 			return err~;
@@ -439,12 +437,11 @@ fn void? renderer_init_vk(RendererVkOptions opt, Allocator allocator = mem)
 fn void renderer_deinit_vk()
 {
 	RendererVk* vk_renderer = &renderer.vk;
-	if (vk_renderer.debug_messenger != 0 && vk::destroyDebugUtilsMessengerEXT)
+	if (vk_renderer.debug_messenger != null && vk::extensions.vkDestroyDebugUtilsMessengerEXT)
 	{
-		vk::destroyDebugUtilsMessengerEXT(vk_renderer.instance, vk_renderer.debug_messenger, null);
+		vk::extensions.vkDestroyDebugUtilsMessengerEXT(vk_renderer.instance, vk_renderer.debug_messenger, null);
 	}
 	if (vk_renderer.instance != (vk::Instance)0) vk::destroyInstance(vk_renderer.instance, null);
-	volk::finalize();
 	*vk_renderer = {};
 }
 
@@ -461,16 +458,16 @@ fn vk::Bool32 vk_debug_messenger_callback(
 	vk::DebugUtilsMessengerCallbackDataEXT* callback_data,
 	void* user_data) @private
 {
-	if (message_severity & vk::DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+	if (message_severity & vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
 	{
 		atomic::fetch_add(&vk_validation_error_count, 1u);
 		log::error("VK ERROR: %s", callback_data.pMessage);
 	}
-	if (message_severity & vk::DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+	if (message_severity & vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
 	{
 		log::warn("VK WARNING: %s", callback_data.pMessage);
 	}
-	if (message_severity & vk::DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
+	if (message_severity & vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
 	{
 		log::info("VK INFO: %s", callback_data.pMessage, category: log::CATEGORY_RENDER);
 	}

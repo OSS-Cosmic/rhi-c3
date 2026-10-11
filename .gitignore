@@ -12,7 +12,6 @@ __pycache__/
 
 # Vendored libraries (built by Meson, see meson.build)
 /vendor/lib/
-/vendor/volk/lib/
 /vendor/imgui_c/lib/
 /vendor/d3d12ma/lib/
 

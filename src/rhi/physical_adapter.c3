@@ -315,7 +315,7 @@ fn void physical_adapter_set_name(PhysicalAdapter* a, String name)
 	if (count > 0) a.name[:count] = name[:count];
 }
 
-fn List{PhysicalAdapter}? enumerate_adapters(Allocator allocator = mem)
+fn List{PhysicalAdapter}? enumerate_adapters(alloc::Allocator allocator = mem)
 {
 	switch (renderer.backend)
 	{
@@ -399,7 +399,7 @@ fn PhysicalAdapter mtl_adapter_from_device(mtl::Device device)
 	return a;
 }
 
-fn List{PhysicalAdapter}? enumerate_adapters_mtl(Allocator allocator = mem)
+fn List{PhysicalAdapter}? enumerate_adapters_mtl(alloc::Allocator allocator = mem)
 {
 	List{PhysicalAdapter} adapters;
 	adapters.init(allocator, 0);
@@ -519,7 +519,7 @@ fn PhysicalAdapter dx12_adapter_from_desc(dxgi::Adapter1* adapter, dxgi::Adapter
 	return a;
 }
 
-fn List{PhysicalAdapter}? enumerate_adapters_dx12(Allocator allocator = mem)
+fn List{PhysicalAdapter}? enumerate_adapters_dx12(alloc::Allocator allocator = mem)
 {
 	RendererDx12* state = &renderer.dx12;
 	dxgi::Factory6* factory = state.factory;
@@ -587,47 +587,47 @@ struct PhysicalAdapterVk
 
 // One adapter per physical device group (its first device). The returned list
 // is owned by the caller and released with `adapters.free()`.
-fn List{PhysicalAdapter}? enumerate_adapters_vk(Allocator allocator = mem)
+fn List{PhysicalAdapter}? enumerate_adapters_vk(alloc::Allocator allocator = mem)
 {
 	List{PhysicalAdapter} adapters;
 	adapters.init(allocator, 0);
 	defer catch adapters.free();
 
 	uint count;
-	vk_check(vk::enumeratePhysicalDeviceGroups(renderer.vk.instance, &count, null))!;
+	vk_check(vk::vkEnumeratePhysicalDeviceGroups(renderer.vk.instance, &count, null))!;
 
 	vk::PhysicalDeviceGroupProperties[] device_group_properties = mem::alloc::alloc_array_try(allocator, vk::PhysicalDeviceGroupProperties, count)!;
 	defer mem::alloc::free(allocator, device_group_properties.ptr);
 
 	foreach (&p : device_group_properties)
 	{
-		*p = { .sType = PHYSICAL_DEVICE_GROUP_PROPERTIES };
+		*p = { .sType = vk::StructureType.STRUCTURE_TYPE_PHYSICAL_DEVICE_GROUP_PROPERTIES };
 	}
 
-	vk_check(vk::enumeratePhysicalDeviceGroups(renderer.vk.instance, &count, device_group_properties.ptr))!;
+	vk_check(vk::vkEnumeratePhysicalDeviceGroups(renderer.vk.instance, &count, device_group_properties.ptr))!;
 
 	for (uint i = 0; i < count; i++)
 	{
 		vk::PhysicalDevice physical_device = device_group_properties[i].physicalDevices[0];
 
 		uint ext_count;
-		vk_check(vk::enumerateDeviceExtensionProperties(physical_device, null, &ext_count, null))!;
+		vk_check(vk::vkEnumerateDeviceExtensionProperties(physical_device, null, &ext_count, null))!;
 
 		vk::ExtensionProperties[] extension_properties = mem::alloc::alloc_array_try(allocator, vk::ExtensionProperties, ext_count)!;
 		defer mem::alloc::free(allocator, extension_properties.ptr);
 
-		vk_check(vk::enumerateDeviceExtensionProperties(physical_device, null, &ext_count, extension_properties.ptr))!;
+		vk_check(vk::vkEnumerateDeviceExtensionProperties(physical_device, null, &ext_count, extension_properties.ptr))!;
 
-		bool has_acceleration_structure = vk_has_extension(extension_properties, vk::KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME.str_view());
-		bool has_ray_tracing_pipeline = vk_has_extension(extension_properties, vk::KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME.str_view());
-		bool has_ray_query = vk_has_extension(extension_properties, vk::KHR_RAY_QUERY_EXTENSION_NAME.str_view());
-		bool has_deferred_host_operations = vk_has_extension(extension_properties, vk::KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME.str_view());
+		bool has_acceleration_structure = vk_has_extension(extension_properties, "VK_KHR_acceleration_structure");
+		bool has_ray_tracing_pipeline = vk_has_extension(extension_properties, "VK_KHR_ray_tracing_pipeline");
+		bool has_ray_query = vk_has_extension(extension_properties, "VK_KHR_ray_query");
+		bool has_deferred_host_operations = vk_has_extension(extension_properties, "VK_KHR_deferred_host_operations");
 
-		vk::PhysicalDeviceProperties2 properties = { .sType = PHYSICAL_DEVICE_PROPERTIES_2 };
-		vk::PhysicalDeviceVulkan11Properties props11 = { .sType = PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES };
-		vk::PhysicalDeviceVulkan12Properties props12 = { .sType = PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES };
-		vk::PhysicalDeviceVulkan13Properties props13 = { .sType = PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES };
-		vk::PhysicalDeviceIDProperties device_id_properties = { .sType = PHYSICAL_DEVICE_ID_PROPERTIES };
+		vk::PhysicalDeviceProperties2 properties = { .sType = vk::StructureType.STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+		vk::PhysicalDeviceVulkan11Properties props11 = { .sType = vk::StructureType.STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES };
+		vk::PhysicalDeviceVulkan12Properties props12 = { .sType = vk::StructureType.STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES };
+		vk::PhysicalDeviceVulkan13Properties props13 = { .sType = vk::StructureType.STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES };
+		vk::PhysicalDeviceIDProperties device_id_properties = { .sType = vk::StructureType.STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
 		vk::PhysicalDeviceAccelerationStructurePropertiesKHR accel_structure_properties = { .sType = (vk::StructureType)1000150014 };
 		vk::PhysicalDeviceRayTracingPipelinePropertiesKHR ray_tracing_pipeline_properties = { .sType = (vk::StructureType)1000347001 };
 
@@ -638,10 +638,10 @@ fn List{PhysicalAdapter}? enumerate_adapters_vk(Allocator allocator = mem)
 		if (has_acceleration_structure) vk_add_next(&properties, &accel_structure_properties);
 		if (has_ray_tracing_pipeline) vk_add_next(&properties, &ray_tracing_pipeline_properties);
 
-		vk::PhysicalDeviceFeatures2 features = { .sType = PHYSICAL_DEVICE_FEATURES_2 };
-		vk::PhysicalDeviceVulkan11Features features11 = { .sType = PHYSICAL_DEVICE_VULKAN_1_1_FEATURES };
-		vk::PhysicalDeviceVulkan12Features features12 = { .sType = PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
-		vk::PhysicalDeviceVulkan13Features features13 = { .sType = PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+		vk::PhysicalDeviceFeatures2 features = { .sType = vk::StructureType.STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+		vk::PhysicalDeviceVulkan11Features features11 = { .sType = vk::StructureType.STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES };
+		vk::PhysicalDeviceVulkan12Features features12 = { .sType = vk::StructureType.STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+		vk::PhysicalDeviceVulkan13Features features13 = { .sType = vk::StructureType.STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
 		vk::PhysicalDevicePresentIdFeaturesKHR present_id_features = { .sType = (vk::StructureType)1000294001 };
 		vk::PhysicalDeviceAccelerationStructureFeaturesKHR accel_structure_features = { .sType = (vk::StructureType)1000150013 };
 		vk::PhysicalDeviceRayTracingPipelineFeaturesKHR ray_tracing_pipeline_features = { .sType = (vk::StructureType)1000347000 };
@@ -651,7 +651,7 @@ fn List{PhysicalAdapter}? enumerate_adapters_vk(Allocator allocator = mem)
 		vk_add_next(&features, &features12);
 		vk_add_next(&features, &features13);
 
-		if (vk_has_extension(extension_properties, vk::KHR_PRESENT_ID_EXTENSION_NAME.str_view()))
+		if (vk_has_extension(extension_properties, "VK_KHR_present_id"))
 		{
 			vk_add_next(&features, &present_id_features);
 		}
@@ -682,15 +682,15 @@ fn List{PhysicalAdapter}? enumerate_adapters_vk(Allocator allocator = mem)
 		AdapterType adapter_type_val = OTHER;
 		switch (properties.properties.deviceType)
 		{
-			case vk::PhysicalDeviceType.OTHER:
+			case vk::PhysicalDeviceType.PHYSICAL_DEVICE_TYPE_OTHER:
 				adapter_type_val = OTHER;
-			case vk::PhysicalDeviceType.INTEGRATED_GPU:
+			case vk::PhysicalDeviceType.PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
 				adapter_type_val = INTEGRATED;
-			case vk::PhysicalDeviceType.DISCRETE_GPU:
+			case vk::PhysicalDeviceType.PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
 				adapter_type_val = DISCRETE;
-			case vk::PhysicalDeviceType.VIRTUAL_GPU:
+			case vk::PhysicalDeviceType.PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
 				adapter_type_val = VIRTUAL;
-			case vk::PhysicalDeviceType.CPU:
+			case vk::PhysicalDeviceType.PHYSICAL_DEVICE_TYPE_CPU:
 				adapter_type_val = CPU;
 			default:
 				adapter_type_val = OTHER;
@@ -825,10 +825,10 @@ fn List{PhysicalAdapter}? enumerate_adapters_vk(Allocator allocator = mem)
 			.physical_device = physical_device,
 			.api_version = properties.properties.apiVersion,
 			.is_present_id_supported = present_id_features.presentId != vk::FALSE,
-			.is_swap_chain_supported = vk_has_extension(extension_properties, vk::KHR_SWAPCHAIN_EXTENSION_NAME.str_view()),
-			.is_buffer_device_address_supported = properties.properties.apiVersion >= vk::API_VERSION_1_2 || vk_has_extension(extension_properties, vk::KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME.str_view()),
-			.is_amd_device_coherent_memory_supported = vk_has_extension(extension_properties, vk::AMD_DEVICE_COHERENT_MEMORY_EXTENSION_NAME.str_view()),
-			.is_maintenance5_supported = vk_has_extension(extension_properties, vk::KHR_MAINTENANCE_5_EXTENSION_NAME.str_view()),
+			.is_swap_chain_supported = vk_has_extension(extension_properties, "VK_KHR_swapchain"),
+			.is_buffer_device_address_supported = properties.properties.apiVersion >= vk::@makeApiVersion(0, 1, 2, 0) || vk_has_extension(extension_properties, "VK_KHR_buffer_device_address"),
+			.is_amd_device_coherent_memory_supported = vk_has_extension(extension_properties, "VK_AMD_device_coherent_memory"),
+			.is_maintenance5_supported = vk_has_extension(extension_properties, "VK_KHR_maintenance_5"),
 			.is_acceleration_structure_supported = has_acceleration_structure && accel_structure_features.accelerationStructure != vk::FALSE,
 			.is_ray_tracing_pipeline_supported = has_ray_tracing_pipeline && ray_tracing_pipeline_features.rayTracingPipeline != vk::FALSE,
 			.is_ray_query_supported = has_ray_query && ray_query_features.rayQuery != vk::FALSE,
@@ -838,7 +838,7 @@ fn List{PhysicalAdapter}? enumerate_adapters_vk(Allocator allocator = mem)
 		for (uint heap_idx = 0; heap_idx < memory_properties.memoryHeapCount; heap_idx++)
 		{
 			vk::MemoryHeap heap = memory_properties.memoryHeaps[heap_idx];
-			if ((heap.flags & vk::MEMORY_HEAP_DEVICE_LOCAL_BIT) && physical_adapter.adapter_type != INTEGRATED)
+			if ((heap.flags & vk::MemoryHeapFlagBits.MEMORY_HEAP_DEVICE_LOCAL_BIT) && physical_adapter.adapter_type != INTEGRATED)
 			{
 				physical_adapter.video_memory_size += (ulong)heap.size;
 			}
@@ -851,7 +851,7 @@ fn List{PhysicalAdapter}? enumerate_adapters_vk(Allocator allocator = mem)
 		for (uint type_idx = 0; type_idx < memory_properties.memoryTypeCount; type_idx++)
 		{
 			vk::MemoryType mem_type = memory_properties.memoryTypes[type_idx];
-			if ((mem_type.propertyFlags & vk::MEMORY_PROPERTY_DEVICE_LOCAL_BIT) && !(mem_type.propertyFlags & vk::MEMORY_PROPERTY_HOST_VISIBLE_BIT))
+			if ((mem_type.propertyFlags & vk::MemoryPropertyFlagBits.MEMORY_PROPERTY_DEVICE_LOCAL_BIT) && !(mem_type.propertyFlags & vk::MemoryPropertyFlagBits.MEMORY_PROPERTY_HOST_VISIBLE_BIT))
 			{
 				physical_adapter.device_upload_heap_size += (ulong)memory_properties.memoryHeaps[mem_type.heapIndex].size;
 			}

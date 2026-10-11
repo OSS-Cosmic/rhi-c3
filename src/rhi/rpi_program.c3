@@ -164,7 +164,7 @@ struct ProgramDescriptorSetSlot
 
 struct Program
 {
-	Allocator allocator;
+	alloc::Allocator allocator;
 	// Indexed by stage ordinal.
 	ProgramShaderBinary[ProgramStage::len] shader_bins;
 	List{ProgramBindingReflection} reflection;
@@ -181,7 +181,7 @@ struct Program
 
 // Builds a program from its stages and an explicit layout. `modules` and
 // `layout` are borrowed; the shader blobs and entry points are copied.
-fn Program? program_init(Device* device, ProgramModuleStage[] modules, ProgramLayout layout, Allocator allocator = mem)
+fn Program? program_init(Device* device, ProgramModuleStage[] modules, ProgramLayout layout, alloc::Allocator allocator = mem)
 {
 	Program p;
 	p.allocator = allocator;
@@ -397,15 +397,14 @@ struct ProgramDescriptorSetVk
 fn vk::ShaderStageFlags program_stages_to_vk(ProgramStageFlags stages) @private
 {
 	vk::ShaderStageFlags flags;
-	if (stages.vertex) flags |= vk::SHADER_STAGE_VERTEX_BIT;
-	if (stages.fragment) flags |= vk::SHADER_STAGE_FRAGMENT_BIT;
-	if (stages.compute) flags |= vk::SHADER_STAGE_COMPUTE_BIT;
+	if (stages.vertex) flags |= vk::ShaderStageFlagBits.SHADER_STAGE_VERTEX_BIT;
+	if (stages.fragment) flags |= vk::ShaderStageFlagBits.SHADER_STAGE_FRAGMENT_BIT;
+	if (stages.compute) flags |= vk::ShaderStageFlagBits.SHADER_STAGE_COMPUTE_BIT;
 	return flags;
 }
 
 fn void? program_init_vk(Program* p, Device* device, ProgramLayout layout)
 {
-	vk::DeviceVTable* vtable = &device.backend.vk.vtable;
 	vk::Device dev = device.backend.vk.device;
 
 	// One list per set keeps the Vulkan binding and binding-flag arrays alive
@@ -436,7 +435,7 @@ fn void? program_init_vk(Program* p, Device* device, ProgramLayout layout)
 			.descriptorCount = lb.count > 0 ? lb.count : 1,
 			.stageFlags = program_stages_to_vk(lb.stages),
 		});
-		set_flags[lb.set].push(lb.count > 1 ? vk::DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT : 0);
+		set_flags[lb.set].push(lb.count > 1 ? vk::DescriptorBindingFlagBits.DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT : 0);
 		if (lb.count > 1) has_array[lb.set] = true;
 	}
 
@@ -450,18 +449,18 @@ fn void? program_init_vk(Program* p, Device* device, ProgramLayout layout)
 	for (uint i = 0; i < layout_count; i++)
 	{
 		vk::DescriptorSetLayoutCreateInfo create_info = {
-			.sType = vk::StructureType.DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.sType = vk::StructureType.STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
 			.bindingCount = (uint)set_bindings[i].len(),
 			.pBindings = set_bindings[i].len() > 0 ? set_bindings[i].entries : null,
 		};
 		vk::DescriptorSetLayoutBindingFlagsCreateInfo flags_info = {
-			.sType = vk::StructureType.DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
+			.sType = vk::StructureType.STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
 			.bindingCount = (uint)set_flags[i].len(),
 			.pBindingFlags = set_flags[i].len() > 0 ? set_flags[i].entries : null,
 		};
 		if (has_array[i]) vk_add_next(&create_info, &flags_info);
 
-		if (catch err = vk_check(vtable.createDescriptorSetLayout(dev, &create_info, null, &set_layouts[i])))
+		if (catch err = vk_check(vk::vkCreateDescriptorSetLayout(dev, &create_info, null, &set_layouts[i])))
 		{
 			program_deinit_vk(p, device);
 			return err~;
@@ -478,7 +477,7 @@ fn void? program_init_vk(Program* p, Device* device, ProgramLayout layout)
 
 	vk::PushConstantRange[1] push_ranges;
 	vk::PipelineLayoutCreateInfo layout_info = {
-		.sType = vk::StructureType.PIPELINE_LAYOUT_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 		.setLayoutCount = layout_count,
 		.pSetLayouts = layout_count > 0 ? &set_layouts[0] : null,
 	};
@@ -492,7 +491,7 @@ fn void? program_init_vk(Program* p, Device* device, ProgramLayout layout)
 		layout_info.pushConstantRangeCount = 1;
 		layout_info.pPushConstantRanges = &push_ranges[0];
 	}
-	if (catch err = vk_check(vtable.createPipelineLayout(dev, &layout_info, null, &p.backend.vk.pipeline_layout)))
+	if (catch err = vk_check(vk::vkCreatePipelineLayout(dev, &layout_info, null, &p.backend.vk.pipeline_layout)))
 	{
 		program_deinit_vk(p, device);
 		return err~;
@@ -503,14 +502,13 @@ fn void? program_init_vk(Program* p, Device* device, ProgramLayout layout)
 
 fn void program_deinit_vk(Program* p, Device* device)
 {
-	vk::DeviceVTable* vtable = &device.backend.vk.vtable;
 	vk::Device dev = device.backend.vk.device;
 
 	p.pipelines.@each(; ulong key, ProgramPipelineSlot slot)
 	{
 		(void)key;
 		if (slot.backend.vk.pipeline != (vk::Pipeline)0) {
-			vtable.destroyPipeline(dev, slot.backend.vk.pipeline, null);
+			vk::destroyPipeline(dev, slot.backend.vk.pipeline, null);
 		}
 	};
 	p.pipelines.clear();
@@ -520,12 +518,12 @@ fn void program_deinit_vk(Program* p, Device* device)
 		ProgramDescriptorSetSlot* slot = &p.sets[i];
 		if (slot.used) rpi_descriptor_set_alloc_free(&slot.backend.vk.alloc, device);
 		if (slot.backend.vk.set_layout != (vk::DescriptorSetLayout)0) {
-			vtable.destroyDescriptorSetLayout(dev, slot.backend.vk.set_layout, null);
+			vk::destroyDescriptorSetLayout(dev, slot.backend.vk.set_layout, null);
 		}
 		slot.backend.vk = {};
 	}
 	if (p.backend.vk.pipeline_layout != (vk::PipelineLayout)0) {
-		vtable.destroyPipelineLayout(dev, p.backend.vk.pipeline_layout, null);
+		vk::destroyPipelineLayout(dev, p.backend.vk.pipeline_layout, null);
 	}
 	p.backend.vk = {};
 }
@@ -535,19 +533,18 @@ fn void program_destroy_pipeline_modules_vk(Device* device, vk::ShaderModule[] m
 	foreach (shader_module : modules)
 	{
 		if (shader_module != (vk::ShaderModule)0) {
-			device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader_module, null);
+			vk::destroyShaderModule(device.backend.vk.device, shader_module, null);
 		}
 	}
 }
 
 fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pipeline_hash, ProgramGraphicsPipelineDesc desc)
 {
-	vk::DeviceVTable* vtable = &device.backend.vk.vtable;
 	vk::Device dev = device.backend.vk.device;
 
 	if (try slot = p.pipelines.get_ref(pipeline_hash))
 	{
-		vtable.cmdBindPipeline(cmd.backend.vk.cmd, vk::PipelineBindPoint.GRAPHICS, slot.backend.vk.pipeline);
+		vk::cmdBindPipeline(cmd.backend.vk.cmd, vk::PipelineBindPoint.PIPELINE_BIND_POINT_GRAPHICS, slot.backend.vk.pipeline);
 		return;
 	}
 
@@ -561,7 +558,7 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 		streams[i] = {
 			.binding = stream.binding,
 			.stride = stream.stride,
-			.inputRate = stream.per_instance ? vk::VertexInputRate.INSTANCE : vk::VertexInputRate.VERTEX,
+			.inputRate = stream.per_instance ? vk::VertexInputRate.VERTEX_INPUT_RATE_INSTANCE : vk::VertexInputRate.VERTEX_INPUT_RATE_VERTEX,
 		};
 	}
 	vk::VertexInputAttributeDescription[PROGRAM_MAX_VERTEX_ATTRIBUTES] attributes;
@@ -575,7 +572,7 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 		};
 	}
 	vk::PipelineVertexInputStateCreateInfo vertex_input = {
-		.sType = vk::StructureType.PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 		.vertexBindingDescriptionCount = (uint)desc.vertex_streams.len,
 		.pVertexBindingDescriptions = desc.vertex_streams.len > 0 ? &streams[0] : null,
 		.vertexAttributeDescriptionCount = (uint)desc.vertex_attributes.len,
@@ -583,32 +580,32 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 	};
 
 	vk::PipelineInputAssemblyStateCreateInfo input_assembly = {
-		.sType = vk::StructureType.PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
 		.topology = to_vk_topology(desc.topology),
 		.primitiveRestartEnable = vk::FALSE,
 	};
 	vk::PipelineRasterizationStateCreateInfo raster = {
-		.sType = vk::StructureType.PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 		.depthClampEnable = vk::FALSE,
 		.rasterizerDiscardEnable = vk::FALSE,
-		.polygonMode = vk::PolygonMode.FILL,
+		.polygonMode = vk::PolygonMode.POLYGON_MODE_FILL,
 		.cullMode = to_vk_cull_mode(desc.cull_mode),
 		.frontFace = to_vk_front_face(desc.front_face),
 		.depthBiasEnable = vk::FALSE,
 		.lineWidth = 1.0,
 	};
 	vk::PipelineViewportStateCreateInfo viewport_state = {
-		.sType = vk::StructureType.PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
 		.viewportCount = 1,
 		.scissorCount = 1,
 	};
 	vk::PipelineMultisampleStateCreateInfo multisample = {
-		.sType = vk::StructureType.PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-		.rasterizationSamples = (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_1_BIT,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+		.rasterizationSamples = (vk::SampleCountFlagBits)vk::SampleCountFlagBits.SAMPLE_COUNT_1_BIT,
 		.minSampleShading = 1.0,
 	};
 	vk::PipelineDepthStencilStateCreateInfo depth_stencil = {
-		.sType = vk::StructureType.PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
 		.depthTestEnable = desc.depth_test ? vk::TRUE : vk::FALSE,
 		.depthWriteEnable = desc.depth_write ? vk::TRUE : vk::FALSE,
 		.depthCompareOp = to_vk_compare_op(desc.depth_compare),
@@ -632,10 +629,10 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 			.write_mask = WRITE_MASK_ALL,
 		};
 		vk::ColorComponentFlags write_mask;
-		if (blend.write_mask.r) write_mask |= vk::COLOR_COMPONENT_R_BIT;
-		if (blend.write_mask.g) write_mask |= vk::COLOR_COMPONENT_G_BIT;
-		if (blend.write_mask.b) write_mask |= vk::COLOR_COMPONENT_B_BIT;
-		if (blend.write_mask.a) write_mask |= vk::COLOR_COMPONENT_A_BIT;
+		if (blend.write_mask.r) write_mask |= vk::ColorComponentFlagBits.COLOR_COMPONENT_R_BIT;
+		if (blend.write_mask.g) write_mask |= vk::ColorComponentFlagBits.COLOR_COMPONENT_G_BIT;
+		if (blend.write_mask.b) write_mask |= vk::ColorComponentFlagBits.COLOR_COMPONENT_B_BIT;
+		if (blend.write_mask.a) write_mask |= vk::ColorComponentFlagBits.COLOR_COMPONENT_A_BIT;
 		blend_attachments[i] = {
 			.blendEnable = color.has_blend ? vk::TRUE : vk::FALSE,
 			.srcColorBlendFactor = to_vk_blend_factor(blend.src_color),
@@ -649,24 +646,24 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 		color_formats[i] = to_vk_format(color.format);
 	}
 	vk::PipelineColorBlendStateCreateInfo color_blend = {
-		.sType = vk::StructureType.PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
 		.logicOpEnable = vk::FALSE,
-		.logicOp = vk::LogicOp.CLEAR,
+		.logicOp = vk::LogicOp.LOGIC_OP_CLEAR,
 		.attachmentCount = (uint)desc.colors.len,
 		.pAttachments = desc.colors.len > 0 ? &blend_attachments[0] : null,
 	};
-	vk::DynamicState[2] dynamic_states = { vk::DynamicState.VIEWPORT, vk::DynamicState.SCISSOR };
+	vk::DynamicState[2] dynamic_states = { vk::DynamicState.DYNAMIC_STATE_VIEWPORT, vk::DynamicState.DYNAMIC_STATE_SCISSOR };
 	vk::PipelineDynamicStateCreateInfo dynamic_state = {
-		.sType = vk::StructureType.PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
 		.dynamicStateCount = 2,
 		.pDynamicStates = &dynamic_states[0],
 	};
 	vk::PipelineRenderingCreateInfo rendering = {
-		.sType = vk::StructureType.PIPELINE_RENDERING_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
 		.colorAttachmentCount = (uint)desc.colors.len,
 		.pColorAttachmentFormats = desc.colors.len > 0 ? &color_formats[0] : null,
-		.depthAttachmentFormat = vk::Format.UNDEFINED,
-		.stencilAttachmentFormat = vk::Format.UNDEFINED,
+		.depthAttachmentFormat = vk::Format.FORMAT_UNDEFINED,
+		.stencilAttachmentFormat = vk::Format.FORMAT_UNDEFINED,
 	};
 	if (desc.has_depth_format)
 	{
@@ -684,17 +681,17 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 	{
 		assert(vertex.data.len % 4 == 0, "SPIR-V size must be a multiple of 4");
 		vk::ShaderModuleCreateInfo info = {
-			.sType = vk::StructureType.SHADER_MODULE_CREATE_INFO,
+			.sType = vk::StructureType.STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
 			.codeSize = vertex.data.len,
 			.pCode = (uint*)vertex.data.ptr,
 		};
-		if (catch err = vk_check(vtable.createShaderModule(dev, &info, null, &modules[stage_count]))) {
+		if (catch err = vk_check(vk::vkCreateShaderModule(dev, &info, null, &modules[stage_count]))) {
 			return err~;
 		}
 		stages[stage_count] = {
-			.sType = vk::StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
-			.stage = (vk::ShaderStageFlagBits)vk::SHADER_STAGE_VERTEX_BIT,
-			.vkmodule = modules[stage_count],
+			.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.stage = (vk::ShaderStageFlagBits)vk::ShaderStageFlagBits.SHADER_STAGE_VERTEX_BIT,
+			.mod = modules[stage_count],
 			.pName = vertex.entry_point,
 		};
 		stage_count++;
@@ -704,26 +701,26 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 	{
 		assert(fragment.data.len % 4 == 0, "SPIR-V size must be a multiple of 4");
 		vk::ShaderModuleCreateInfo info = {
-			.sType = vk::StructureType.SHADER_MODULE_CREATE_INFO,
+			.sType = vk::StructureType.STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
 			.codeSize = fragment.data.len,
 			.pCode = (uint*)fragment.data.ptr,
 		};
-		if (catch err = vk_check(vtable.createShaderModule(dev, &info, null, &modules[stage_count])))
+		if (catch err = vk_check(vk::vkCreateShaderModule(dev, &info, null, &modules[stage_count])))
 		{
 			program_destroy_pipeline_modules_vk(device, modules[:stage_count]);
 			return err~;
 		}
 		stages[stage_count] = {
-			.sType = vk::StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
-			.stage = (vk::ShaderStageFlagBits)vk::SHADER_STAGE_FRAGMENT_BIT,
-			.vkmodule = modules[stage_count],
+			.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.stage = (vk::ShaderStageFlagBits)vk::ShaderStageFlagBits.SHADER_STAGE_FRAGMENT_BIT,
+			.mod = modules[stage_count],
 			.pName = fragment.entry_point,
 		};
 		stage_count++;
 	}
 
 	vk::GraphicsPipelineCreateInfo create_info = {
-		.sType = vk::StructureType.GRAPHICS_PIPELINE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
 		.stageCount = stage_count,
 		.pStages = stage_count > 0 ? &stages[0] : null,
 		.pVertexInputState = &vertex_input,
@@ -741,7 +738,7 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 	vk_add_next(&create_info, &rendering);
 
 	vk::Pipeline pipeline;
-	if (catch err = vk_check(vtable.createGraphicsPipelines(dev, (vk::PipelineCache)0, 1, &create_info, null, &pipeline)))
+	if (catch err = vk_check(vk::vkCreateGraphicsPipelines(dev, (vk::PipelineCache)0, 1, &create_info, null, &pipeline)))
 	{
 		program_destroy_pipeline_modules_vk(device, modules[:stage_count]);
 		return err~;
@@ -750,14 +747,14 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 
 	ProgramPipelineSlot slot = { .backend.vk.pipeline = pipeline };
 	p.pipelines[pipeline_hash] = slot;
-	vtable.cmdBindPipeline(cmd.backend.vk.cmd, vk::PipelineBindPoint.GRAPHICS, pipeline);
+	vk::cmdBindPipeline(cmd.backend.vk.cmd, vk::PipelineBindPoint.PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 	return;
 }
 
 fn void program_push_constants_vk(Program* p, Device* device, Cmd* cmd, char[] data, uint offset)
 {
 	assert(p.has_push_constant, "program_push_constants: layout declares no push constants");
-	device.backend.vk.vtable.cmdPushConstants(
+	vk::cmdPushConstants(
 		cmd.backend.vk.cmd,
 		p.backend.vk.pipeline_layout,
 		program_stages_to_vk(p.push_constant_stages),
@@ -780,8 +777,8 @@ fn ulong program_hash_mix(ulong h, ulong v) @private
 fn void? program_bind_descriptors_vk(Program* p, Device* device, Cmd* cmd, uint frame_index, DescriptorBinding[] bindings, ProgramBindPoint bind_point)
 {
 	vk::PipelineBindPoint vk_bind = bind_point == GRAPHICS
-		? vk::PipelineBindPoint.GRAPHICS
-		: vk::PipelineBindPoint.COMPUTE;
+		? vk::PipelineBindPoint.PIPELINE_BIND_POINT_GRAPHICS
+		: vk::PipelineBindPoint.PIPELINE_BIND_POINT_COMPUTE;
 	vk::DescriptorSet[PROGRAM_DESCRIPTOR_SET_MAX] sets_to_bind;
 	uint first_set = 0;
 	uint bind_count = 0;
@@ -818,12 +815,12 @@ fn void? program_bind_descriptors_vk(Program* p, Device* device, Cmd* cmd, uint 
 				if (reflection == null || reflection.set != set_index || descriptor_is_empty(binding.descriptor)) continue;
 				if (n == writes.len)
 				{
-					device.backend.vk.vtable.updateDescriptorSets(device.backend.vk.device, n, &writes[0], 0, null);
+					vk::updateDescriptorSets(device.backend.vk.device, n, &writes[0], 0, null);
 					n = 0;
 				}
 				Descriptor d = binding.descriptor;
 				writes[n] = {
-					.sType = vk::StructureType.WRITE_DESCRIPTOR_SET,
+					.sType = vk::StructureType.STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 					.dstSet = set.handle,
 					.dstBinding = reflection.is_array ? reflection.base_register : reflection.base_register + binding.register_offset,
 					.dstArrayElement = reflection.is_array ? binding.register_offset : 0,
@@ -837,10 +834,10 @@ fn void? program_bind_descriptors_vk(Program* p, Device* device, Cmd* cmd, uint 
 						buffer_infos[n] = { .buffer = (vk::Buffer)d.handle, .offset = (vk::DeviceSize)d.offset, .range = (vk::DeviceSize)d.range };
 						writes[n].pBufferInfo = &buffer_infos[n];
 					case SAMPLED_IMAGE:
-						image_infos[n] = { .imageView = (vk::ImageView)d.handle, .imageLayout = d.depth_read_only ? vk::ImageLayout.DEPTH_READ_ONLY_OPTIMAL : vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL };
+						image_infos[n] = { .imageView = (vk::ImageView)d.handle, .imageLayout = d.depth_read_only ? vk::ImageLayout.IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL : vk::ImageLayout.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
 						writes[n].pImageInfo = &image_infos[n];
 					case STORAGE_IMAGE:
-						image_infos[n] = { .imageView = (vk::ImageView)d.handle, .imageLayout = vk::ImageLayout.GENERAL };
+						image_infos[n] = { .imageView = (vk::ImageView)d.handle, .imageLayout = vk::ImageLayout.IMAGE_LAYOUT_GENERAL };
 						writes[n].pImageInfo = &image_infos[n];
 					case SAMPLER:
 						image_infos[n] = { .sampler = (vk::Sampler)d.handle };
@@ -851,13 +848,13 @@ fn void? program_bind_descriptors_vk(Program* p, Device* device, Cmd* cmd, uint 
 				n++;
 			}
 			if (n > 0) {
-				device.backend.vk.vtable.updateDescriptorSets(device.backend.vk.device, n, &writes[0], 0, null);
+				vk::updateDescriptorSets(device.backend.vk.device, n, &writes[0], 0, null);
 			}
 		}
 
 		if (bind_count > 0 && first_set + bind_count != set_index)
 		{
-			device.backend.vk.vtable.cmdBindDescriptorSets(
+			vk::cmdBindDescriptorSets(
 				cmd.backend.vk.cmd, vk_bind, p.backend.vk.pipeline_layout,
 				first_set, bind_count, &sets_to_bind[0], 0, null);
 			bind_count = 0;
@@ -867,7 +864,7 @@ fn void? program_bind_descriptors_vk(Program* p, Device* device, Cmd* cmd, uint 
 		bind_count++;
 	}
 	if (bind_count > 0) {
-		device.backend.vk.vtable.cmdBindDescriptorSets(
+		vk::cmdBindDescriptorSets(
 			cmd.backend.vk.cmd, vk_bind, p.backend.vk.pipeline_layout,
 			first_set, bind_count, &sets_to_bind[0], 0, null);
 	}
@@ -913,10 +910,10 @@ struct RpiDescriptorSetAlloc
 	List{vk::DescriptorPool} pools;
 	List{RpiDescriptorSetSlotBlock} blocks;
 	sz block_index;
-	Allocator allocator;
+	alloc::Allocator allocator;
 }
 
-fn RpiDescriptorSetAlloc rpi_descriptor_set_alloc_init(vk::DescriptorSetLayout set_layout, RpiPoolSizes sizes, uint frames_in_flight, Allocator allocator = mem)
+fn RpiDescriptorSetAlloc rpi_descriptor_set_alloc_init(vk::DescriptorSetLayout set_layout, RpiPoolSizes sizes, uint frames_in_flight, alloc::Allocator allocator = mem)
 {
 	RpiDescriptorSetAlloc result = {
 		.frames_in_flight = frames_in_flight,
@@ -936,7 +933,7 @@ fn void rpi_descriptor_set_alloc_free(RpiDescriptorSetAlloc* a, Device* device)
 {
 	foreach (pool : a.pools)
 	{
-		device.backend.vk.vtable.destroyDescriptorPool(device.backend.vk.device, pool, null);
+		vk::destroyDescriptorPool(device.backend.vk.device, pool, null);
 	}
 	foreach (&block : a.blocks)
 	{
@@ -1011,61 +1008,60 @@ fn RpiDescriptorSetSlot*? rpi_descriptor_set_alloc_resolve(RpiDescriptorSetAlloc
 // then allocate RPI_DESCRIPTOR_SETS_PER_POOL sets into the reserve.
 fn void? rpi_descriptor_set_alloc_create_pool(RpiDescriptorSetAlloc* a, Device* device) @private
 {
-	vk::DeviceVTable* vtable = &device.backend.vk.vtable;
 	vk::Device dev = device.backend.vk.device;
 	vk::DescriptorPoolSize[5] pool_sizes;
 	uint pool_size_count = 0;
 
 	if (a.sizes.sampler > 0)
 	{
-		pool_sizes[pool_size_count] = { .type = vk::DescriptorType.SAMPLER, .descriptorCount = a.sizes.sampler * RPI_DESCRIPTOR_SETS_PER_POOL };
+		pool_sizes[pool_size_count] = { .type = vk::DescriptorType.DESCRIPTOR_TYPE_SAMPLER, .descriptorCount = a.sizes.sampler * RPI_DESCRIPTOR_SETS_PER_POOL };
 		pool_size_count += 1;
 	}
 	if (a.sizes.sampled_image > 0)
 	{
-		pool_sizes[pool_size_count] = { .type = vk::DescriptorType.SAMPLED_IMAGE, .descriptorCount = a.sizes.sampled_image * RPI_DESCRIPTOR_SETS_PER_POOL };
+		pool_sizes[pool_size_count] = { .type = vk::DescriptorType.DESCRIPTOR_TYPE_SAMPLED_IMAGE, .descriptorCount = a.sizes.sampled_image * RPI_DESCRIPTOR_SETS_PER_POOL };
 		pool_size_count += 1;
 	}
 	if (a.sizes.storage_image > 0)
 	{
-		pool_sizes[pool_size_count] = { .type = vk::DescriptorType.STORAGE_IMAGE, .descriptorCount = a.sizes.storage_image * RPI_DESCRIPTOR_SETS_PER_POOL };
+		pool_sizes[pool_size_count] = { .type = vk::DescriptorType.DESCRIPTOR_TYPE_STORAGE_IMAGE, .descriptorCount = a.sizes.storage_image * RPI_DESCRIPTOR_SETS_PER_POOL };
 		pool_size_count += 1;
 	}
 	if (a.sizes.uniform_buffer > 0)
 	{
-		pool_sizes[pool_size_count] = { .type = vk::DescriptorType.UNIFORM_BUFFER, .descriptorCount = a.sizes.uniform_buffer * RPI_DESCRIPTOR_SETS_PER_POOL };
+		pool_sizes[pool_size_count] = { .type = vk::DescriptorType.DESCRIPTOR_TYPE_UNIFORM_BUFFER, .descriptorCount = a.sizes.uniform_buffer * RPI_DESCRIPTOR_SETS_PER_POOL };
 		pool_size_count += 1;
 	}
 	if (a.sizes.storage_buffer > 0)
 	{
-		pool_sizes[pool_size_count] = { .type = vk::DescriptorType.STORAGE_BUFFER, .descriptorCount = a.sizes.storage_buffer * RPI_DESCRIPTOR_SETS_PER_POOL };
+		pool_sizes[pool_size_count] = { .type = vk::DescriptorType.DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = a.sizes.storage_buffer * RPI_DESCRIPTOR_SETS_PER_POOL };
 		pool_size_count += 1;
 	}
 
 	vk::DescriptorPoolCreateInfo pool_info = {
-		.sType = vk::StructureType.DESCRIPTOR_POOL_CREATE_INFO,
-		.flags = vk::DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+		.sType = vk::StructureType.STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+		.flags = vk::DescriptorPoolCreateFlagBits.DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
 		.maxSets = RPI_DESCRIPTOR_SETS_PER_POOL,
 		.poolSizeCount = pool_size_count,
 		.pPoolSizes = pool_size_count > 0 ? &pool_sizes[0] : null,
 	};
 	vk::DescriptorPool pool;
-	vk::Result result = vtable.createDescriptorPool(dev, &pool_info, null, &pool);
+	vk::Result result = vk::vkCreateDescriptorPool(dev, &pool_info, null, &pool);
 	if (result != vk::Result.SUCCESS) return vk_check(result);
 
 	vk::DescriptorSetLayout[RPI_DESCRIPTOR_SETS_PER_POOL] layouts;
 	for (sz i = 0; i < RPI_DESCRIPTOR_SETS_PER_POOL; i++) layouts[i] = a.set_layout;
 	vk::DescriptorSet[RPI_DESCRIPTOR_SETS_PER_POOL] handles;
 	vk::DescriptorSetAllocateInfo alloc_info = {
-		.sType = vk::StructureType.DESCRIPTOR_SET_ALLOCATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
 		.descriptorPool = pool,
 		.descriptorSetCount = RPI_DESCRIPTOR_SETS_PER_POOL,
 		.pSetLayouts = &layouts[0],
 	};
-	result = vtable.allocateDescriptorSets(dev, &alloc_info, &handles[0]);
+	result = vk::vkAllocateDescriptorSets(dev, &alloc_info, &handles[0]);
 	if (result != vk::Result.SUCCESS)
 	{
-		vtable.destroyDescriptorPool(dev, pool, null);
+		vk::destroyDescriptorPool(dev, pool, null);
 		return vk_check(result);
 	}
 
@@ -1083,7 +1079,7 @@ fn void? rpi_descriptor_set_alloc_create_pool(RpiDescriptorSetAlloc* a, Device* 
 			alloc::free(a.allocator, block.slots.ptr);
 			a.blocks.remove_last()!!;
 		}
-		vtable.destroyDescriptorPool(dev, pool, null);
+		vk::destroyDescriptorPool(dev, pool, null);
 	};
 
 	RpiDescriptorSetSlot*[RPI_DESCRIPTOR_SETS_PER_POOL] slots;
@@ -1170,11 +1166,11 @@ fn vk::DescriptorType vk_descriptor_type_from(DescriptorType type)
 {
 	switch (type)
 	{
-		case SAMPLED_IMAGE: return vk::DescriptorType.SAMPLED_IMAGE;
-		case STORAGE_IMAGE: return vk::DescriptorType.STORAGE_IMAGE;
-		case SAMPLER: return vk::DescriptorType.SAMPLER;
-		case UNIFORM_BUFFER: return vk::DescriptorType.UNIFORM_BUFFER;
-		case STORAGE_BUFFER: return vk::DescriptorType.STORAGE_BUFFER;
+		case SAMPLED_IMAGE: return vk::DescriptorType.DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+		case STORAGE_IMAGE: return vk::DescriptorType.DESCRIPTOR_TYPE_STORAGE_IMAGE;
+		case SAMPLER: return vk::DescriptorType.DESCRIPTOR_TYPE_SAMPLER;
+		case UNIFORM_BUFFER: return vk::DescriptorType.DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		case STORAGE_BUFFER: return vk::DescriptorType.DESCRIPTOR_TYPE_STORAGE_BUFFER;
 		case ACCELERATION_STRUCTURE: return (vk::DescriptorType)1000150000;
 	}
 }

@@ -142,7 +142,7 @@ struct SwapchainWgpu
 
 // ---- renderer / adapter / device / queue ---------------------------------
 
-fn void? renderer_init_wgpu(RendererWgpuOptions opts, Allocator allocator = mem)
+fn void? renderer_init_wgpu(RendererWgpuOptions opts, alloc::Allocator allocator = mem)
 {
 	uint adapter = wgpu_adapter_get();
 	if (adapter == 0) return INITIALIZATION_FAILED~;
@@ -155,7 +155,7 @@ fn void renderer_deinit_wgpu()
 	renderer = {};
 }
 
-fn List{PhysicalAdapter}? enumerate_adapters_wgpu(Allocator allocator = mem)
+fn List{PhysicalAdapter}? enumerate_adapters_wgpu(alloc::Allocator allocator = mem)
 {
 	List{PhysicalAdapter} adapters;
 	adapters.init(allocator, 0);
@@ -201,7 +201,7 @@ fn uint wgpu_limit(uint adapter, String key, uint fallback)
 	return value == 0 ? fallback : value;
 }
 
-fn Device? device_init_wgpu(PhysicalAdapter* adapter, Allocator allocator = mem)
+fn Device? device_init_wgpu(PhysicalAdapter* adapter, alloc::Allocator allocator = mem)
 {
 	if (adapter == null || adapter.backend.wgpu.adapter == 0) return INITIALIZATION_FAILED~;
 	uint device = wgpu_device_get();
@@ -511,7 +511,7 @@ fn void pipeline_deinit_wgpu(Pipeline* p, Device* device)
 
 // ---- canvas swapchain -----------------------------------------------------
 
-fn Swapchain? swapchain_init_wgpu(Device* device, SwapchainDesc desc, Allocator allocator = mem)
+fn Swapchain? swapchain_init_wgpu(Device* device, SwapchainDesc desc, alloc::Allocator allocator = mem)
 {
 	assert(device != null && device.backend.wgpu.device != 0, "WebGPU swapchain requires an initialized device");
 	uint surface = 0;

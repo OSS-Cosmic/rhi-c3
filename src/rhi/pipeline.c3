@@ -801,21 +801,21 @@ fn vk::BlendFactor to_vk_blend_factor(BlendFactor factor) @private
 {
 	switch (factor)
 	{
-	case ZERO: return vk::BlendFactor.ZERO;
-	case ONE: return vk::BlendFactor.ONE;
-	case SRC_COLOR: return vk::BlendFactor.SRC_COLOR;
-	case ONE_MINUS_SRC_COLOR: return vk::BlendFactor.ONE_MINUS_SRC_COLOR;
-	case DST_COLOR: return vk::BlendFactor.DST_COLOR;
-	case ONE_MINUS_DST_COLOR: return vk::BlendFactor.ONE_MINUS_DST_COLOR;
-	case SRC_ALPHA: return vk::BlendFactor.SRC_ALPHA;
-	case ONE_MINUS_SRC_ALPHA: return vk::BlendFactor.ONE_MINUS_SRC_ALPHA;
-	case DST_ALPHA: return vk::BlendFactor.DST_ALPHA;
-	case ONE_MINUS_DST_ALPHA: return vk::BlendFactor.ONE_MINUS_DST_ALPHA;
-	case CONSTANT_COLOR: return vk::BlendFactor.CONSTANT_COLOR;
-	case ONE_MINUS_CONSTANT_COLOR: return vk::BlendFactor.ONE_MINUS_CONSTANT_COLOR;
-	case CONSTANT_ALPHA: return vk::BlendFactor.CONSTANT_ALPHA;
-	case ONE_MINUS_CONSTANT_ALPHA: return vk::BlendFactor.ONE_MINUS_CONSTANT_ALPHA;
-	case SRC_ALPHA_SATURATE: return vk::BlendFactor.SRC_ALPHA_SATURATE;
+	case ZERO: return vk::BlendFactor.BLEND_FACTOR_ZERO;
+	case ONE: return vk::BlendFactor.BLEND_FACTOR_ONE;
+	case SRC_COLOR: return vk::BlendFactor.BLEND_FACTOR_SRC_COLOR;
+	case ONE_MINUS_SRC_COLOR: return vk::BlendFactor.BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+	case DST_COLOR: return vk::BlendFactor.BLEND_FACTOR_DST_COLOR;
+	case ONE_MINUS_DST_COLOR: return vk::BlendFactor.BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+	case SRC_ALPHA: return vk::BlendFactor.BLEND_FACTOR_SRC_ALPHA;
+	case ONE_MINUS_SRC_ALPHA: return vk::BlendFactor.BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	case DST_ALPHA: return vk::BlendFactor.BLEND_FACTOR_DST_ALPHA;
+	case ONE_MINUS_DST_ALPHA: return vk::BlendFactor.BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+	case CONSTANT_COLOR: return vk::BlendFactor.BLEND_FACTOR_CONSTANT_COLOR;
+	case ONE_MINUS_CONSTANT_COLOR: return vk::BlendFactor.BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
+	case CONSTANT_ALPHA: return vk::BlendFactor.BLEND_FACTOR_CONSTANT_ALPHA;
+	case ONE_MINUS_CONSTANT_ALPHA: return vk::BlendFactor.BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+	case SRC_ALPHA_SATURATE: return vk::BlendFactor.BLEND_FACTOR_SRC_ALPHA_SATURATE;
 	}
 }
 
@@ -823,11 +823,11 @@ fn vk::BlendOp to_vk_blend_op(BlendOp op) @private
 {
 	switch (op)
 	{
-	case ADD: return vk::BlendOp.ADD;
-	case SUBTRACT: return vk::BlendOp.SUBTRACT;
-	case REVERSE_SUBTRACT: return vk::BlendOp.REVERSE_SUBTRACT;
-	case MIN: return vk::BlendOp.MIN;
-	case MAX: return vk::BlendOp.MAX;
+	case ADD: return vk::BlendOp.BLEND_OP_ADD;
+	case SUBTRACT: return vk::BlendOp.BLEND_OP_SUBTRACT;
+	case REVERSE_SUBTRACT: return vk::BlendOp.BLEND_OP_REVERSE_SUBTRACT;
+	case MIN: return vk::BlendOp.BLEND_OP_MIN;
+	case MAX: return vk::BlendOp.BLEND_OP_MAX;
 	}
 }
 
@@ -835,14 +835,14 @@ fn vk::CompareOp to_vk_compare_op(CompareOp op) @private
 {
 	switch (op)
 	{
-	case NEVER: return vk::CompareOp.NEVER;
-	case LESS: return vk::CompareOp.LESS;
-	case EQUAL: return vk::CompareOp.EQUAL;
-	case LESS_EQUAL: return vk::CompareOp.LESS_OR_EQUAL;
-	case GREATER: return vk::CompareOp.GREATER;
-	case NOT_EQUAL: return vk::CompareOp.NOT_EQUAL;
-	case GREATER_EQUAL: return vk::CompareOp.GREATER_OR_EQUAL;
-	case ALWAYS: return vk::CompareOp.ALWAYS;
+	case NEVER: return vk::CompareOp.COMPARE_OP_NEVER;
+	case LESS: return vk::CompareOp.COMPARE_OP_LESS;
+	case EQUAL: return vk::CompareOp.COMPARE_OP_EQUAL;
+	case LESS_EQUAL: return vk::CompareOp.COMPARE_OP_LESS_OR_EQUAL;
+	case GREATER: return vk::CompareOp.COMPARE_OP_GREATER;
+	case NOT_EQUAL: return vk::CompareOp.COMPARE_OP_NOT_EQUAL;
+	case GREATER_EQUAL: return vk::CompareOp.COMPARE_OP_GREATER_OR_EQUAL;
+	case ALWAYS: return vk::CompareOp.COMPARE_OP_ALWAYS;
 	}
 }
 
@@ -850,11 +850,11 @@ fn vk::Format to_vk_vertex_format(VertexFormat format) @private
 {
 	switch (format)
 	{
-	case FLOAT: return vk::Format.R32_SFLOAT;
-	case FLOAT2: return vk::Format.R32G32_SFLOAT;
-	case FLOAT3: return vk::Format.R32G32B32_SFLOAT;
-	case FLOAT4: return vk::Format.R32G32B32A32_SFLOAT;
-	case UBYTE4_NORM: return vk::Format.R8G8B8A8_UNORM;
+	case FLOAT: return vk::Format.FORMAT_R32_SFLOAT;
+	case FLOAT2: return vk::Format.FORMAT_R32G32_SFLOAT;
+	case FLOAT3: return vk::Format.FORMAT_R32G32B32_SFLOAT;
+	case FLOAT4: return vk::Format.FORMAT_R32G32B32A32_SFLOAT;
+	case UBYTE4_NORM: return vk::Format.FORMAT_R8G8B8A8_UNORM;
 	}
 }
 
@@ -862,11 +862,11 @@ fn vk::PrimitiveTopology to_vk_topology(PrimitiveTopology topology) @private
 {
 	switch (topology)
 	{
-	case POINT_LIST: return vk::PrimitiveTopology.POINT_LIST;
-	case LINE_LIST: return vk::PrimitiveTopology.LINE_LIST;
-	case LINE_STRIP: return vk::PrimitiveTopology.LINE_STRIP;
-	case TRIANGLE_LIST: return vk::PrimitiveTopology.TRIANGLE_LIST;
-	case TRIANGLE_STRIP: return vk::PrimitiveTopology.TRIANGLE_STRIP;
+	case POINT_LIST: return vk::PrimitiveTopology.PRIMITIVE_TOPOLOGY_POINT_LIST;
+	case LINE_LIST: return vk::PrimitiveTopology.PRIMITIVE_TOPOLOGY_LINE_LIST;
+	case LINE_STRIP: return vk::PrimitiveTopology.PRIMITIVE_TOPOLOGY_LINE_STRIP;
+	case TRIANGLE_LIST: return vk::PrimitiveTopology.PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	case TRIANGLE_STRIP: return vk::PrimitiveTopology.PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
 	}
 }
 
@@ -874,9 +874,9 @@ fn vk::CullModeFlags to_vk_cull_mode(CullMode mode) @private
 {
 	switch (mode)
 	{
-	case NONE: return 0;
-	case FRONT: return vk::CULL_MODE_FRONT_BIT;
-	case BACK: return vk::CULL_MODE_BACK_BIT;
+	case NONE: return (vk::CullModeFlags)0;
+	case FRONT: return vk::CullModeFlagBits.CULL_MODE_FRONT_BIT;
+	case BACK: return vk::CullModeFlagBits.CULL_MODE_BACK_BIT;
 	}
 }
 
@@ -884,8 +884,8 @@ fn vk::FrontFace to_vk_front_face(FrontFace face) @private
 {
 	switch (face)
 	{
-	case CLOCKWISE: return vk::FrontFace.CLOCKWISE;
-	case COUNTER_CLOCKWISE: return vk::FrontFace.COUNTER_CLOCKWISE;
+	case CLOCKWISE: return vk::FrontFace.FRONT_FACE_CLOCKWISE;
+	case COUNTER_CLOCKWISE: return vk::FrontFace.FRONT_FACE_COUNTER_CLOCKWISE;
 	}
 }
 
@@ -896,15 +896,15 @@ fn Pipeline? pipeline_init_graphics_vk(Device* device, PipelineGraphicsOptions o
 
 	vk::PipelineShaderStageCreateInfo[2] stages = {
 		{
-			.sType = vk::StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
-			.stage = (vk::ShaderStageFlagBits)vk::SHADER_STAGE_VERTEX_BIT,
-			.vkmodule = shader.vertex_module,
+			.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.stage = (vk::ShaderStageFlagBits)vk::ShaderStageFlagBits.SHADER_STAGE_VERTEX_BIT,
+			.mod = shader.vertex_module,
 			.pName = "main",
 		},
 		{
-			.sType = vk::StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
-			.stage = (vk::ShaderStageFlagBits)vk::SHADER_STAGE_FRAGMENT_BIT,
-			.vkmodule = shader.pixel_module,
+			.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.stage = (vk::ShaderStageFlagBits)vk::ShaderStageFlagBits.SHADER_STAGE_FRAGMENT_BIT,
+			.mod = shader.pixel_module,
 			.pName = "main",
 		},
 	};
@@ -924,10 +924,10 @@ fn Pipeline? pipeline_init_graphics_vk(Device* device, PipelineGraphicsOptions o
 		if (target.has_blend) blend = target.blend;
 
 		vk::ColorComponentFlags write_mask = 0;
-		if (blend.write_mask.r) write_mask |= vk::COLOR_COMPONENT_R_BIT;
-		if (blend.write_mask.g) write_mask |= vk::COLOR_COMPONENT_G_BIT;
-		if (blend.write_mask.b) write_mask |= vk::COLOR_COMPONENT_B_BIT;
-		if (blend.write_mask.a) write_mask |= vk::COLOR_COMPONENT_A_BIT;
+		if (blend.write_mask.r) write_mask |= vk::ColorComponentFlagBits.COLOR_COMPONENT_R_BIT;
+		if (blend.write_mask.g) write_mask |= vk::ColorComponentFlagBits.COLOR_COMPONENT_G_BIT;
+		if (blend.write_mask.b) write_mask |= vk::ColorComponentFlagBits.COLOR_COMPONENT_B_BIT;
+		if (blend.write_mask.a) write_mask |= vk::ColorComponentFlagBits.COLOR_COMPONENT_A_BIT;
 
 		color_formats[i] = to_vk_format(target.format);
 		color_attachments[i] = {
@@ -943,60 +943,60 @@ fn Pipeline? pipeline_init_graphics_vk(Device* device, PipelineGraphicsOptions o
 	}
 
 	vk::DynamicState[2] dynamic_states = {
-		vk::DynamicState.VIEWPORT,
-		vk::DynamicState.SCISSOR,
+		vk::DynamicState.DYNAMIC_STATE_VIEWPORT,
+		vk::DynamicState.DYNAMIC_STATE_SCISSOR,
 	};
 	vk::PipelineDynamicStateCreateInfo dynamic_state = {
-		.sType = vk::StructureType.PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
 		.dynamicStateCount = dynamic_states.len,
 		.pDynamicStates = &dynamic_states[0],
 	};
 	vk::PipelineColorBlendStateCreateInfo color_blend = {
-		.sType = vk::StructureType.PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
 		.logicOpEnable = vk::FALSE,
-		.logicOp = vk::LogicOp.CLEAR,
+		.logicOp = vk::LogicOp.LOGIC_OP_CLEAR,
 		.attachmentCount = options.colors.len,
 		.pAttachments = &color_attachments[0],
 		.blendConstants = { 0, 0, 0, 0 },
 	};
 	vk::PipelineViewportStateCreateInfo viewport = {
-		.sType = vk::StructureType.PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
 		.viewportCount = 1,
 		.scissorCount = 1,
 	};
 
 	vk::PipelineRasterizationStateCreateInfo rasterization = {
-		.sType = vk::StructureType.PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
 		.depthClampEnable = vk::FALSE,
 		.rasterizerDiscardEnable = vk::FALSE,
-		.polygonMode = vk::PolygonMode.FILL,
+		.polygonMode = vk::PolygonMode.POLYGON_MODE_FILL,
 		.cullMode = to_vk_cull_mode(options.raster.cull_mode),
 		.frontFace = to_vk_front_face(options.raster.front_face),
 		.depthBiasEnable = vk::FALSE,
 		.lineWidth = 1.0,
 	};
 	vk::PipelineInputAssemblyStateCreateInfo input_assembly = {
-		.sType = vk::StructureType.PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
 		.topology = to_vk_topology(options.raster.topology),
 		.primitiveRestartEnable = vk::FALSE,
 	};
 	vk::PipelineMultisampleStateCreateInfo multisample = {
-		.sType = vk::StructureType.PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-		.rasterizationSamples = (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_1_BIT,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+		.rasterizationSamples = (vk::SampleCountFlagBits)vk::SampleCountFlagBits.SAMPLE_COUNT_1_BIT,
 		.sampleShadingEnable = vk::FALSE,
 	};
 
 	vk::VertexInputBindingDescription binding = {};
 	vk::VertexInputAttributeDescription[MAX_COLOR_ATTACHMENTS] attributes = {};
 	vk::PipelineVertexInputStateCreateInfo vertex_input = {
-		.sType = vk::StructureType.PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 	};
 	if (options.has_vertex_layout) {
 		assert(options.vertex_layout.attributes.len <= MAX_COLOR_ATTACHMENTS);
 		binding = {
 			.binding = 0,
 			.stride = options.vertex_layout.stride,
-			.inputRate = vk::VertexInputRate.VERTEX,
+			.inputRate = vk::VertexInputRate.VERTEX_INPUT_RATE_VERTEX,
 		};
 		foreach (i, attribute : options.vertex_layout.attributes) {
 			attributes[i] = {
@@ -1014,11 +1014,11 @@ fn Pipeline? pipeline_init_graphics_vk(Device* device, PipelineGraphicsOptions o
 
 	vk::PushConstantRange[1] push_constants = {};
 	vk::PipelineLayoutCreateInfo layout_info = {
-		.sType = vk::StructureType.PIPELINE_LAYOUT_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 	};
 	if (options.push_constant_size > 0) {
 		push_constants[0] = {
-			.stageFlags = vk::SHADER_STAGE_VERTEX_BIT,
+			.stageFlags = vk::ShaderStageFlagBits.SHADER_STAGE_VERTEX_BIT,
 			.offset = 0,
 			.size = options.push_constant_size,
 		};
@@ -1027,13 +1027,13 @@ fn Pipeline? pipeline_init_graphics_vk(Device* device, PipelineGraphicsOptions o
 	}
 
 	vk::PipelineLayout layout;
-	vk_check(device.backend.vk.vtable.createPipelineLayout(device.backend.vk.device, &layout_info, null, &layout))!;
+	vk_check(vk::vkCreatePipelineLayout(device.backend.vk.device, &layout_info, null, &layout))!;
 
 	vk::PipelineDepthStencilStateCreateInfo depth_stencil = {
-		.sType = vk::StructureType.PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
 		.depthTestEnable = options.has_depth ? vk::TRUE : vk::FALSE,
 		.depthWriteEnable = options.has_depth && options.depth.write ? vk::TRUE : vk::FALSE,
-		.depthCompareOp = options.has_depth ? to_vk_compare_op(options.depth.compare) : vk::CompareOp.LESS,
+		.depthCompareOp = options.has_depth ? to_vk_compare_op(options.depth.compare) : vk::CompareOp.COMPARE_OP_LESS,
 		.depthBoundsTestEnable = vk::FALSE,
 		.stencilTestEnable = vk::FALSE,
 		.minDepthBounds = 0.0,
@@ -1041,17 +1041,17 @@ fn Pipeline? pipeline_init_graphics_vk(Device* device, PipelineGraphicsOptions o
 	};
 
 	vk::PipelineRenderingCreateInfo rendering = {
-		.sType = vk::StructureType.PIPELINE_RENDERING_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
 		.colorAttachmentCount = options.colors.len,
 		.pColorAttachmentFormats = &color_formats[0],
-		.depthAttachmentFormat = options.has_depth ? to_vk_format(options.depth.format) : vk::Format.UNDEFINED,
+		.depthAttachmentFormat = options.has_depth ? to_vk_format(options.depth.format) : vk::Format.FORMAT_UNDEFINED,
 		.stencilAttachmentFormat = options.has_depth && format_get_props(options.depth.format).is_stencil
 			? to_vk_format(options.depth.format)
-			: vk::Format.UNDEFINED,
+			: vk::Format.FORMAT_UNDEFINED,
 	};
 
 	vk::GraphicsPipelineCreateInfo pipeline_info = {
-		.sType = vk::StructureType.GRAPHICS_PIPELINE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
 		.stageCount = stages.len,
 		.pStages = &stages[0],
 		.pVertexInputState = &vertex_input,
@@ -1068,9 +1068,9 @@ fn Pipeline? pipeline_init_graphics_vk(Device* device, PipelineGraphicsOptions o
 	vk_add_next(&pipeline_info, &rendering);
 
 	vk::Pipeline pipeline;
-	if (catch err = vk_check(device.backend.vk.vtable.createGraphicsPipelines(
+	if (catch err = vk_check(vk::vkCreateGraphicsPipelines(
 		device.backend.vk.device, (vk::PipelineCache)0, 1, &pipeline_info, null, &pipeline))) {
-		device.backend.vk.vtable.destroyPipelineLayout(device.backend.vk.device, layout, null);
+		vk::destroyPipelineLayout(device.backend.vk.device, layout, null);
 		return err~;
 	}
 
@@ -1083,10 +1083,10 @@ fn Pipeline? pipeline_init_graphics_vk(Device* device, PipelineGraphicsOptions o
 fn void pipeline_deinit_vk(Pipeline* pipeline, Device* device)
 {
 	if (pipeline.backend.vk.pipeline != (vk::Pipeline)0) {
-		device.backend.vk.vtable.destroyPipeline(device.backend.vk.device, pipeline.backend.vk.pipeline, null);
+		vk::destroyPipeline(device.backend.vk.device, pipeline.backend.vk.pipeline, null);
 	}
 	if (pipeline.backend.vk.layout != (vk::PipelineLayout)0) {
-		device.backend.vk.vtable.destroyPipelineLayout(device.backend.vk.device, pipeline.backend.vk.layout, null);
+		vk::destroyPipelineLayout(device.backend.vk.device, pipeline.backend.vk.layout, null);
 	}
 	pipeline.backend.vk = {};
 	pipeline.cookie = 0;

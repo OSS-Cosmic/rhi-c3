@@ -36,26 +36,6 @@ vulkan_deps = [vma, stage_vma]
 test_deps = [vma, stage_vma]
 imgui_test_deps = []
 
-# --- volk (Vulkan loader; needs the vendor/volk submodule) ---------------
-if fs.is_file('vendor/volk/volk.c')
-  volk = static_library(
-    'volk', 'vendor/volk/volk.c',
-    include_directories: include_directories('vendor/volk'),
-    c_args: ['-DVK_NO_PROTOTYPES'],
-    override_options: ['optimization=2', 'b_staticpic=true'],
-  )
-  stage_volk = custom_target(
-    'stage-volk',
-    input: volk, output: 'volk.stamp',
-    command: [python, stage, '@INPUT@', root / 'vendor/volk/lib', '@OUTPUT@'],
-    build_by_default: true,
-  )
-  vulkan_deps += [volk, stage_volk]
-  test_deps += [volk, stage_volk]
-else
-  message('volk skipped: vendor/volk is missing; run: git submodule update --init vendor/volk')
-endif
-
 # --- imgui (optional: needs the vendor/imgui_c/imgui submodules) -----------------
 if fs.is_file('vendor/imgui_c/imgui/imgui.cpp')
   imgui = static_library(
@@ -124,8 +104,7 @@ if sdl3_flags == ['']
 endif
 
 if c3c.found()
-  # The host tests need VMA and volk on Vulkan hosts, but the macOS host
-  # exercises Metal and should not compile Vulkan-only support libraries.
+  # The macOS host exercises Metal and does not need Vulkan support libraries.
   host_test_deps = host_machine.system() == 'darwin' ? imgui_test_deps : test_deps
   test(
     'c3-host', c3c,
@@ -187,9 +166,6 @@ if c3c.found()
     'src/vendor/metal/metal.c3', 'src/vendor/metal/quartzcore.c3',
     'src/vendor/metal/types.c3', 'src/vendor/metal/wrapper.c3',
     'src/vendor/sdl3/sdl3.c3', 'src/vendor/vma/vma.c3',
-    'src/vendor/volk/volk.c3', 'src/vendor/vulkan/core.c3',
-    'src/vendor/vulkan/enums.c3', 'src/vendor/vulkan/procedures.c3',
-    'src/vendor/vulkan/structs.c3',
   )
   # backend -> [c3c target, shader formats, library targets, examples]
   backends = {

@@ -412,34 +412,34 @@ fn void? shader_create_module_vk(Device* device, char[] data, vk::ShaderModule* 
 {
 	assert(data.len % 4 == 0);
 	vk::ShaderModuleCreateInfo info = {
-		.sType = vk::StructureType.SHADER_MODULE_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
 		.codeSize = data.len,
 		.pCode = (uint*)data.ptr,
 	};
 	vk::ShaderModule shader_module;
-	vk_check(device.backend.vk.vtable.createShaderModule(device.backend.vk.device, &info, null, &shader_module))!;
+	vk_check(vk::vkCreateShaderModule(device.backend.vk.device, &info, null, &shader_module))!;
 	*out_module = shader_module;
 }
 
 fn void shader_destroy_modules_vk(Device* device, ShaderVk* shader) @private
 {
 	if (shader.vertex_module != (vk::ShaderModule)0) {
-		device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader.vertex_module, null);
+		vk::destroyShaderModule(device.backend.vk.device, shader.vertex_module, null);
 	}
 	if (shader.tesselation_control_module != (vk::ShaderModule)0) {
-		device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader.tesselation_control_module, null);
+		vk::destroyShaderModule(device.backend.vk.device, shader.tesselation_control_module, null);
 	}
 	if (shader.tesselation_evaluation_module != (vk::ShaderModule)0) {
-		device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader.tesselation_evaluation_module, null);
+		vk::destroyShaderModule(device.backend.vk.device, shader.tesselation_evaluation_module, null);
 	}
 	if (shader.geometry_module != (vk::ShaderModule)0) {
-		device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader.geometry_module, null);
+		vk::destroyShaderModule(device.backend.vk.device, shader.geometry_module, null);
 	}
 	if (shader.pixel_module != (vk::ShaderModule)0) {
-		device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader.pixel_module, null);
+		vk::destroyShaderModule(device.backend.vk.device, shader.pixel_module, null);
 	}
 	if (shader.compute_module != (vk::ShaderModule)0) {
-		device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader.compute_module, null);
+		vk::destroyShaderModule(device.backend.vk.device, shader.compute_module, null);
 	}
 	*shader = {};
 }

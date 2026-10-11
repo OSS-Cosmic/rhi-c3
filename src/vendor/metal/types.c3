@@ -9,7 +9,7 @@
 //
 // Enums are `constdef X : inline NSUInteger` with explicit values (`inline`
 // so they pass straight into the NSUInteger msgSend slots); members are upper
-// snake case minus the type prefix (`PixelFormat.BGRA8UNORM`). Option sets follow c3/src/vendor/vulkan:
+// snake case minus the type prefix (`PixelFormat.BGRA8UNORM`). Option sets follow vendor/vulkan.c3l/vk:
 // `typedef ResourceOptions @constinit = NSUInteger;` with one module constant
 // per bit (`mtl::RESOURCE_STORAGE_MODE_PRIVATE`).
 module mtl @feat(DARWIN);

@@ -146,7 +146,7 @@ enum SwapchainStatus : char
 
 struct Swapchain
 {
-	Allocator allocator;
+	alloc::Allocator allocator;
 	Queue* present_queue;
 	// Number of images the caller may index. Always 1 on the web.
 	uint image_count;
@@ -179,7 +179,7 @@ struct SwapchainFrameSubmit
 	CommandRingElement* completion;
 }
 
-fn Swapchain? swapchain_init(Device* device, SwapchainDesc desc, Allocator allocator = mem)
+fn Swapchain? swapchain_init(Device* device, SwapchainDesc desc, alloc::Allocator allocator = mem)
 {
 	swapchain_validate_desc(desc)!;
 	switch (renderer.backend)
@@ -575,7 +575,7 @@ struct SwapchainMtl
 	mtl::CAMetalDrawable current_drawable;
 }
 
-fn Swapchain? swapchain_init_mtl(Device* device, SwapchainDesc desc, Allocator allocator = mem)
+fn Swapchain? swapchain_init_mtl(Device* device, SwapchainDesc desc, alloc::Allocator allocator = mem)
 {
 	assert(device != null && device.backend.mtl.device, "Metal swapchain requires an initialized device");
 
@@ -772,6 +772,8 @@ fn SwapchainStatus? swapchain_frame_submit_mtl(Swapchain* s, Device* device, Que
 module rhi @feat(RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
 import vk;
 
+extern fn vk::Connection* x_get_xcb_connection(void* display) @cname("XGetXCBConnection") @feat(LINUX);
+
 const uint MAX_SWAPCHAIN_IMAGES = 8;
 
 // Semaphores deviate from rhi-zig on purpose. Acquire semaphores rotate per
@@ -822,31 +824,31 @@ struct SwapchainVk
 }
 
 // Only referenced on Windows when a WindowWin32 omits its module handle.
-extern fn vk::Hinstance vk_get_module_handle_w(vk::Lpcwstr module_name)
+extern fn vk::HInstance vk_get_module_handle_w(vk::LpcWstr module_name)
 	@cname("GetModuleHandleW") @feat(WIN32);
 
 fn uint swapchain_priority_bt709_g10_16bit(vk::SurfaceFormatKHR f) @private
 {
-	return (uint)(f.format == vk::Format.R16G16B16A16_SFLOAT) |
-		(uint)(f.colorSpace == vk::ColorSpaceKHR.EXTENDED_SRGB_LINEAR_EXT) << 1;
+	return (uint)(f.format == vk::Format.FORMAT_R16G16B16A16_SFLOAT) |
+		(uint)(f.colorSpace == vk::ColorSpaceKHR.COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT) << 1;
 }
 
 fn uint swapchain_priority_bt709_g22_8bit(vk::SurfaceFormatKHR f) @private
 {
-	return (uint)(f.format == vk::Format.R8G8B8A8_UNORM || f.format == vk::Format.B8G8R8A8_UNORM) |
-		(uint)(f.colorSpace == vk::ColorSpaceKHR.SRGB_NONLINEAR) << 1;
+	return (uint)(f.format == vk::Format.FORMAT_R8G8B8A8_UNORM || f.format == vk::Format.FORMAT_B8G8R8A8_UNORM) |
+		(uint)(f.colorSpace == vk::ColorSpaceKHR.COLOR_SPACE_SRGB_NONLINEAR_KHR) << 1;
 }
 
 fn uint swapchain_priority_bt709_g22_10bit(vk::SurfaceFormatKHR f) @private
 {
-	return (uint)(f.format == vk::Format.A2B10G10R10_UNORM_PACK32) |
-		(uint)(f.colorSpace == vk::ColorSpaceKHR.SRGB_NONLINEAR) << 1;
+	return (uint)(f.format == vk::Format.FORMAT_A2B10G10R10_UNORM_PACK32) |
+		(uint)(f.colorSpace == vk::ColorSpaceKHR.COLOR_SPACE_SRGB_NONLINEAR_KHR) << 1;
 }
 
 fn uint swapchain_priority_bt2020_g2084_10bit(vk::SurfaceFormatKHR f) @private
 {
-	return (uint)(f.format == vk::Format.A2B10G10R10_UNORM_PACK32) |
-		(uint)(f.colorSpace == vk::ColorSpaceKHR.HDR10_ST2084_EXT) << 1;
+	return (uint)(f.format == vk::Format.FORMAT_A2B10G10R10_UNORM_PACK32) |
+		(uint)(f.colorSpace == vk::ColorSpaceKHR.COLOR_SPACE_HDR10_ST2084_EXT) << 1;
 }
 
 fn uint swapchain_format_priority(SwapchainFormat want, vk::SurfaceFormatKHR format) @private
@@ -869,41 +871,41 @@ fn vk::SurfaceKHR? swapchain_create_surface_vk(WindowHandle handle) @private
 		case X11:
 			$if env::LINUX:
 				assert(handle.x11.display != null && handle.x11.window != 0, "X11 swapchain requires a display and window");
-				if (!vk::createXlibSurfaceKHR) return INITIALIZATION_FAILED~;
-				vk::XlibSurfaceCreateInfoKHR info = {
-					.sType = (vk::StructureType)1000004000,
-					.dpy = (vk::XlibDisplay*)handle.x11.display,
-					.window = (vk::XlibWindow)handle.x11.window,
+				if (!vk::extensions.vkCreateXcbSurfaceKHR) return INITIALIZATION_FAILED~;
+				vk::XcbSurfaceCreateInfoKHR info = {
+					.sType = (vk::StructureType)1000005000,
+					.connection = x_get_xcb_connection(handle.x11.display),
+					.window = (vk::Window)handle.x11.window,
 				};
-				result = vk::createXlibSurfaceKHR(renderer.vk.instance, &info, null, &surface);
+				result = vk::extensions.vkCreateXcbSurfaceKHR(renderer.vk.instance, &info, null, &surface);
 			$else
 				return INITIALIZATION_FAILED~;
 			$endif
 		case WAYLAND:
 			$if env::LINUX:
 				assert(handle.wayland.display != null && handle.wayland.surface != null, "Wayland swapchain requires a display and surface");
-				if (!vk::createWaylandSurfaceKHR) return INITIALIZATION_FAILED~;
+				if (!vk::extensions.vkCreateWaylandSurfaceKHR) return INITIALIZATION_FAILED~;
 				vk::WaylandSurfaceCreateInfoKHR info = {
 					.sType = (vk::StructureType)1000006000,
-					.display = (vk::WlDisplay*)handle.wayland.display,
-					.surface = (vk::WlSurface*)handle.wayland.surface,
+					.display = (vk::Display*)handle.wayland.display,
+					.surface = (vk::WLSurface*)handle.wayland.surface,
 				};
-				result = vk::createWaylandSurfaceKHR(renderer.vk.instance, &info, null, &surface);
+				result = vk::extensions.vkCreateWaylandSurfaceKHR(renderer.vk.instance, &info, null, &surface);
 			$else
 				return INITIALIZATION_FAILED~;
 			$endif
 		case WIN32:
 			$if env::WIN32:
 				assert(handle.win32.hwnd != null, "Win32 swapchain requires a window handle");
-				if (!vk::createWin32SurfaceKHR) return INITIALIZATION_FAILED~;
-				vk::Hinstance hinstance = (vk::Hinstance)handle.win32.hinstance;
+				if (!vk::extensions.vkCreateWin32SurfaceKHR) return INITIALIZATION_FAILED~;
+				vk::HInstance hinstance = (vk::HInstance)handle.win32.hinstance;
 				if (!hinstance) hinstance = vk_get_module_handle_w(null);
 				vk::Win32SurfaceCreateInfoKHR info = {
-					.sType = vk::StructureType.vk::WIN32_SURFACE_CREATE_INFO_KHR,
+					.sType = vk::StructureType.STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
 					.hinstance = hinstance,
-					.hwnd = (vk::Hwnd)handle.win32.hwnd,
+					.hwnd = (vk::HWnd)handle.win32.hwnd,
 				};
-				result = vk::createWin32SurfaceKHR(renderer.vk.instance, &info, null, &surface);
+				result = vk::extensions.vkCreateWin32SurfaceKHR(renderer.vk.instance, &info, null, &surface);
 			$else
 				return INITIALIZATION_FAILED~;
 			$endif
@@ -921,10 +923,10 @@ fn vk::SurfaceKHR? swapchain_create_surface_vk(WindowHandle handle) @private
 fn vk::SurfaceFormatKHR? swapchain_select_format_vk(vk::PhysicalDevice physical, vk::SurfaceKHR surface, SwapchainFormat want) @private
 {
 	uint count;
-	vk_check(vk::getPhysicalDeviceSurfaceFormatsKHR(physical, surface, &count, null))!;
+	vk_check(vk::extensions.vkGetPhysicalDeviceSurfaceFormatsKHR(physical, surface, &count, null))!;
 	if (count == 0) return INITIALIZATION_FAILED~;
 	vk::SurfaceFormatKHR[] formats = mem::temp_array(vk::SurfaceFormatKHR, count);
-	vk_check(vk::getPhysicalDeviceSurfaceFormatsKHR(physical, surface, &count, formats.ptr))!;
+	vk_check(vk::extensions.vkGetPhysicalDeviceSurfaceFormatsKHR(physical, surface, &count, formats.ptr))!;
 	vk::SurfaceFormatKHR best = formats[0];
 	for (uint i = 1; i < count; i++)
 	{
@@ -935,12 +937,12 @@ fn vk::SurfaceFormatKHR? swapchain_select_format_vk(vk::PhysicalDevice physical,
 
 fn vk::PresentModeKHR? swapchain_select_present_mode_vk(vk::PhysicalDevice physical, vk::SurfaceKHR surface, bool vsync) @private
 {
-	if (vsync) return vk::PresentModeKHR.FIFO;
+	if (vsync) return vk::PresentModeKHR.PRESENT_MODE_FIFO_KHR;
 	uint count;
-	vk_check(vk::getPhysicalDeviceSurfacePresentModesKHR(physical, surface, &count, null))!;
+	vk_check(vk::extensions.vkGetPhysicalDeviceSurfacePresentModesKHR(physical, surface, &count, null))!;
 	vk::PresentModeKHR[] modes = mem::temp_array(vk::PresentModeKHR, count);
-	vk_check(vk::getPhysicalDeviceSurfacePresentModesKHR(physical, surface, &count, modes.ptr))!;
-	vk::PresentModeKHR[2] preferred = { vk::PresentModeKHR.MAILBOX, vk::PresentModeKHR.IMMEDIATE };
+	vk_check(vk::extensions.vkGetPhysicalDeviceSurfacePresentModesKHR(physical, surface, &count, modes.ptr))!;
+	vk::PresentModeKHR[2] preferred = { vk::PresentModeKHR.PRESENT_MODE_MAILBOX_KHR, vk::PresentModeKHR.PRESENT_MODE_IMMEDIATE_KHR };
 	foreach (mode : preferred)
 	{
 		foreach (available : modes)
@@ -948,7 +950,7 @@ fn vk::PresentModeKHR? swapchain_select_present_mode_vk(vk::PhysicalDevice physi
 			if (available == mode) return mode;
 		}
 	}
-	return vk::PresentModeKHR.FIFO;
+	return vk::PresentModeKHR.PRESENT_MODE_FIFO_KHR;
 }
 
 // Destroys whatever v holds; zero handles are skipped, so this also unwinds
@@ -960,7 +962,7 @@ fn void swapchain_release_vk(SwapchainVk* v, Device* device, bool destroy_surfac
 	{
 		if (v.acquire_semaphores[i].backend.vk.semaphore != (vk::Semaphore)0) semaphore_deinit_vk(&v.acquire_semaphores[i], device);
 		if (v.present_semaphores[i].backend.vk.semaphore != (vk::Semaphore)0) semaphore_deinit_vk(&v.present_semaphores[i], device);
-		if (v.acquire_fences[i] != (vk::Fence)0) device.backend.vk.vtable.destroyFence(device.backend.vk.device, v.acquire_fences[i], null);
+		if (v.acquire_fences[i] != (vk::Fence)0) vk::destroyFence(device.backend.vk.device, v.acquire_fences[i], null);
 		v.acquire_fences[i] = (vk::Fence)0;
 		v.acquire_wait_timeline[i] = null;
 		v.acquire_wait_value[i] = 0;
@@ -970,20 +972,19 @@ fn void swapchain_release_vk(SwapchainVk* v, Device* device, bool destroy_surfac
 		v.images[i] = (vk::Image)0;
 		v.image_cookies[i] = 0;
 	}
-	if (v.swapchain != 0)
+	if (v.swapchain != null)
 	{
-		device.backend.vk.vtable.destroySwapchainKHR(device.backend.vk.device, v.swapchain, null);
-		v.swapchain = 0;
+		vk::extensions.vkDestroySwapchainKHR(device.backend.vk.device, v.swapchain, null);
+		v.swapchain = (vk::SwapchainKHR)null;
 	}
-	if (destroy_surface && v.surface != 0) vk::destroySurfaceKHR(renderer.vk.instance, v.surface, null);
-	v.surface = 0;
+	if (destroy_surface && v.surface != null) vk::extensions.vkDestroySurfaceKHR(renderer.vk.instance, v.surface, null);
+	v.surface = (vk::SurfaceKHR)null;
 }
 
-fn Swapchain? swapchain_init_vk(Device* device, SwapchainDesc desc, Allocator allocator = mem)
+fn Swapchain? swapchain_init_vk(Device* device, SwapchainDesc desc, alloc::Allocator allocator = mem)
 {
 	assert(device != null, "Vulkan swapchain requires an initialized device");
 	vk::PhysicalDevice physical = device.adapter.backend.vk.physical_device;
-	vk::DeviceVTable* vtable = &device.backend.vk.vtable;
 
 	SwapchainVk v = {};
 	bool owns_surface = false;
@@ -1000,11 +1001,11 @@ fn Swapchain? swapchain_init_vk(Device* device, SwapchainDesc desc, Allocator al
 		case NONE:
 			return SURFACE_LOST~;
 	}
-	if (v.surface == 0) return SURFACE_LOST~;
+	if (v.surface == null) return SURFACE_LOST~;
 	defer catch swapchain_release_vk(&v, device, owns_surface);
 
 	vk::Bool32 supported;
-	vk_check(vk::getPhysicalDeviceSurfaceSupportKHR(physical, desc.queue.backend.vk.family_index, v.surface, &supported))!;
+	vk_check(vk::extensions.vkGetPhysicalDeviceSurfaceSupportKHR(physical, desc.queue.backend.vk.family_index, v.surface, &supported))!;
 	if (!supported) return INITIALIZATION_FAILED~;
 
 	if (old != null)
@@ -1022,7 +1023,7 @@ fn Swapchain? swapchain_init_vk(Device* device, SwapchainDesc desc, Allocator al
 	}
 
 	vk::SurfaceCapabilitiesKHR caps;
-	vk_check(vk::getPhysicalDeviceSurfaceCapabilitiesKHR(physical, v.surface, &caps))!;
+	vk_check(vk::extensions.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical, v.surface, &caps))!;
 	vk::Extent2D extent = caps.currentExtent;
 	if (extent.width == uint::max)
 	{
@@ -1039,20 +1040,20 @@ fn Swapchain? swapchain_init_vk(Device* device, SwapchainDesc desc, Allocator al
 	image_count = min(image_count, MAX_SWAPCHAIN_IMAGES);
 	if (image_count < caps.minImageCount) return INITIALIZATION_FAILED~;
 
-	vk::CompositeAlphaFlagsKHR composite_alpha = vk::COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-	if ((caps.supportedCompositeAlpha & composite_alpha) == 0)
+	vk::CompositeAlphaFlagsKHR composite_alpha = vk::CompositeAlphaFlagBitsKHR.COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	if ((caps.supportedCompositeAlpha & composite_alpha) == (vk::CompositeAlphaFlagBitsKHR)0)
 	{
-		vk::CompositeAlphaFlagsKHR[4] alpha_flags = {
-			vk::COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
-			vk::COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
-			vk::COMPOSITE_ALPHA_INHERIT_BIT_KHR,
-			vk::COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+		vk::CompositeAlphaFlagBitsKHR[4] alpha_flags = {
+			vk::CompositeAlphaFlagBitsKHR.COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+			vk::CompositeAlphaFlagBitsKHR.COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+			vk::CompositeAlphaFlagBitsKHR.COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+			vk::CompositeAlphaFlagBitsKHR.COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
 		};
 		foreach (flag : alpha_flags)
 		{
-			if ((caps.supportedCompositeAlpha & flag) != 0)
+			if ((caps.supportedCompositeAlpha & flag) != (vk::CompositeAlphaFlagBitsKHR)0)
 			{
-				composite_alpha = flag;
+				composite_alpha = (vk::CompositeAlphaFlagsKHR)flag;
 				break;
 			}
 		}
@@ -1066,20 +1067,20 @@ fn Swapchain? swapchain_init_vk(Device* device, SwapchainDesc desc, Allocator al
 		.imageColorSpace = v.colorspace,
 		.imageExtent = extent,
 		.imageArrayLayers = 1,
-		.imageUsage = vk::IMAGE_USAGE_COLOR_ATTACHMENT_BIT | vk::IMAGE_USAGE_TRANSFER_SRC_BIT,
-		.imageSharingMode = vk::SharingMode.EXCLUSIVE,
+		.imageUsage = vk::ImageUsageFlagBits.IMAGE_USAGE_COLOR_ATTACHMENT_BIT | vk::ImageUsageFlagBits.IMAGE_USAGE_TRANSFER_SRC_BIT,
+		.imageSharingMode = vk::SharingMode.SHARING_MODE_EXCLUSIVE,
 		.preTransform = caps.currentTransform,
 		.compositeAlpha = composite_alpha,
 		.presentMode = v.present_mode,
 		.clipped = vk::TRUE,
-		.oldSwapchain = old != null ? old.backend.vk.swapchain : 0,
+		.oldSwapchain = old != null ? old.backend.vk.swapchain : (vk::SwapchainKHR)null,
 	};
-	vk_check(vtable.createSwapchainKHR(device.backend.vk.device, &create_info, null, &v.swapchain))!;
+	vk_check(vk::extensions.vkCreateSwapchainKHR(device.backend.vk.device, &create_info, null, &v.swapchain))!;
 
 	uint count;
-	vk_check(vtable.getSwapchainImagesKHR(device.backend.vk.device, v.swapchain, &count, null))!;
+	vk_check(vk::extensions.vkGetSwapchainImagesKHR(device.backend.vk.device, v.swapchain, &count, null))!;
 	if (count == 0 || count > MAX_SWAPCHAIN_IMAGES) return INITIALIZATION_FAILED~;
-	vk_check(vtable.getSwapchainImagesKHR(device.backend.vk.device, v.swapchain, &count, &v.images[0]))!;
+	vk_check(vk::extensions.vkGetSwapchainImagesKHR(device.backend.vk.device, v.swapchain, &count, &v.images[0]))!;
 	for (uint i = 0; i < count; i++)
 	{
 		v.image_cookies[i] = next_cookie();
@@ -1098,11 +1099,11 @@ fn Swapchain? swapchain_init_vk(Device* device, SwapchainDesc desc, Allocator al
 		})!;
 		v.acquire_semaphores[i] = semaphore_init_vk(device)!;
 		v.present_semaphores[i] = semaphore_init_vk(device)!;
-		vk::FenceCreateInfo fence_info = { .sType = vk::StructureType.FENCE_CREATE_INFO };
-		vk_check(vtable.createFence(device.backend.vk.device, &fence_info, null, &v.acquire_fences[i]))!;
+		vk::FenceCreateInfo fence_info = { .sType = vk::StructureType.STRUCTURE_TYPE_FENCE_CREATE_INFO };
+		vk_check(vk::vkCreateFence(device.backend.vk.device, &fence_info, null, &v.acquire_fences[i]))!;
 	}
 
-	if (old != null) old.backend.vk.surface = 0;
+	if (old != null) old.backend.vk.surface = (vk::SurfaceKHR)null;
 	return {
 		.allocator = allocator,
 		.present_queue = desc.queue,
@@ -1150,8 +1151,8 @@ fn SwapchainStatus? swapchain_acquire_next_image_vk(Swapchain* s, Device* device
 		else
 		{
 			vk::Fence fence = v.acquire_fences[acquire_idx];
-			vk_check(device.backend.vk.vtable.waitForFences(device.backend.vk.device, 1, &fence, vk::TRUE, ulong::max))!;
-			vk_check(device.backend.vk.vtable.resetFences(device.backend.vk.device, 1, &fence))!;
+			vk_check(vk::vkWaitForFences(device.backend.vk.device, 1, &fence, vk::TRUE, ulong::max))!;
+			vk_check(vk::vkResetFences(device.backend.vk.device, 1, &fence))!;
 		}
 		v.acquire_wait_timeline[acquire_idx] = null;
 		v.acquire_wait_value[acquire_idx] = 0;
@@ -1159,7 +1160,7 @@ fn SwapchainStatus? swapchain_acquire_next_image_vk(Swapchain* s, Device* device
 	}
 
 	uint index;
-	vk::Result result = device.backend.vk.vtable.acquireNextImageKHR(
+	vk::Result result = vk::extensions.vkAcquireNextImageKHR(
 		device.backend.vk.device, v.swapchain, ulong::max,
 		v.acquire_semaphores[acquire_idx].backend.vk.semaphore, (vk::Fence)0, &index);
 	switch (result)
@@ -1217,7 +1218,7 @@ fn SwapchainStatus? swapchain_frame_submit_vk(Swapchain* s, Device* device, Queu
 	TimelineOp[] signals = {};
 	if (submit.timeline) signals = signal_ops[..];
 	bool has_completion_fence = submit.completion != null && submit.completion.backend.vk.fence != (vk::Fence)0;
-	vk::Fence fallback_fence = !submit.timeline && !has_completion_fence ? v.acquire_fences[acquire_idx] : 0;
+	vk::Fence fallback_fence = !submit.timeline && !has_completion_fence ? v.acquire_fences[acquire_idx] : (vk::Fence)null;
 	queue_submit_vk(queue, device, {
 		.cmds = submit.cmds,
 		.signals = signals,
@@ -1233,7 +1234,7 @@ fn SwapchainStatus? swapchain_frame_submit_vk(Swapchain* s, Device* device, Queu
 	}
 	else if (has_completion_fence)
 	{
-		vk_check(device.backend.vk.vtable.queueSubmit2(queue.backend.vk.queue, 0, null, v.acquire_fences[acquire_idx]))!;
+		vk_check(vk::vkQueueSubmit2(queue.backend.vk.queue, 0, null, v.acquire_fences[acquire_idx]))!;
 	}
 	v.acquire_pending[acquire_idx] = true;
 
@@ -1247,7 +1248,7 @@ fn SwapchainStatus? swapchain_frame_submit_vk(Swapchain* s, Device* device, Queu
 		.pSwapchains = &v.swapchain,
 		.pImageIndices = &image_index,
 	};
-	vk::Result result = device.backend.vk.vtable.queuePresentKHR(s.present_queue.backend.vk.queue, &present_info);
+	vk::Result result = vk::extensions.vkQueuePresentKHR(s.present_queue.backend.vk.queue, &present_info);
 	switch (result)
 	{
 		case vk::Result.SUCCESS: return OK;

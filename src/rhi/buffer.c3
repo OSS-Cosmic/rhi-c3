@@ -94,10 +94,10 @@ fn Buffer? buffer_init_general(Device* device, BufferDesc desc)
 			$if HAS_VK:
 				{
 					vk::BufferCreateInfo create_info = {
-						.sType = vk::StructureType.BUFFER_CREATE_INFO,
+						.sType = vk::StructureType.STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 						.size = (vk::DeviceSize)desc.size,
 						.usage = buffer_usage_flags_vk(device, desc),
-						.sharingMode = vk::SharingMode.EXCLUSIVE,
+						.sharingMode = vk::SharingMode.SHARING_MODE_EXCLUSIVE,
 					};
 					vma::AllocationCreateInfo allocation_info = buffer_allocation_info_vk(desc);
 					vk::Buffer buffer;
@@ -535,28 +535,28 @@ fn vk::BufferUsageFlags buffer_usage_flags_vk(Device* device, BufferDesc desc) @
 {
 	vk::BufferUsageFlags usage;
 	if (desc.usage.device_address || device.adapter.backend.vk.is_buffer_device_address_supported) {
-		usage |= vk::BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 	}
-	if (desc.usage.transfer_dst) usage |= vk::BUFFER_USAGE_TRANSFER_DST_BIT;
-	if (desc.usage.transfer_src) usage |= vk::BUFFER_USAGE_TRANSFER_SRC_BIT;
-	if (desc.usage.vertex_buffer) usage |= vk::BUFFER_USAGE_VERTEX_BUFFER_BIT;
-	if (desc.usage.index_buffer) usage |= vk::BUFFER_USAGE_INDEX_BUFFER_BIT;
-	if (desc.usage.constant_buffer) usage |= vk::BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-	if (desc.usage.argument_buffer || desc.usage.indirect) usage |= vk::BUFFER_USAGE_INDIRECT_BUFFER_BIT;
-	if (desc.usage.scratch_buffer) usage |= vk::BUFFER_USAGE_STORAGE_BUFFER_BIT;
-	if (desc.usage.shader_binding_table) usage |= vk::BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
-	if (desc.usage.acceleration_structure_storage) usage |= vk::BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
-	if (desc.usage.acceleration_structure_build_input) usage |= vk::BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
-	if (desc.usage.micromap_storage) usage |= vk::BUFFER_USAGE_MICROMAP_STORAGE_BIT_EXT;
-	if (desc.usage.micromap_build_input) usage |= vk::BUFFER_USAGE_MICROMAP_BUILD_INPUT_READ_ONLY_BIT_EXT;
+	if (desc.usage.transfer_dst) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_TRANSFER_DST_BIT;
+	if (desc.usage.transfer_src) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_TRANSFER_SRC_BIT;
+	if (desc.usage.vertex_buffer) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	if (desc.usage.index_buffer) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_INDEX_BUFFER_BIT;
+	if (desc.usage.constant_buffer) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+	if (desc.usage.argument_buffer || desc.usage.indirect) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+	if (desc.usage.scratch_buffer) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_STORAGE_BUFFER_BIT;
+	if (desc.usage.shader_binding_table) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR;
+	if (desc.usage.acceleration_structure_storage) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+	if (desc.usage.acceleration_structure_build_input) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+	if (desc.usage.micromap_storage) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_MICROMAP_STORAGE_BIT_EXT;
+	if (desc.usage.micromap_build_input) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_MICROMAP_BUILD_INPUT_READ_ONLY_BIT_EXT;
 	if (desc.stride == 0 || desc.stride == 4)
 	{
-		if (desc.usage.shader_resource) usage |= vk::BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
-		if (desc.usage.shader_resource_storage) usage |= vk::BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+		if (desc.usage.shader_resource) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+		if (desc.usage.shader_resource_storage) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
 	}
 	if (desc.stride > 0)
 	{
-		usage |= vk::BUFFER_USAGE_STORAGE_BUFFER_BIT;
+		usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_STORAGE_BUFFER_BIT;
 	}
 	return usage;
 }

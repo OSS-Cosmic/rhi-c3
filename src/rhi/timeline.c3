@@ -184,7 +184,7 @@ struct TimelineDeferral
 	sz pending;
 }
 
-fn void TimelineDeferral.init(&self, Allocator allocator = mem)
+fn void TimelineDeferral.init(&self, alloc::Allocator allocator = mem)
 {
 	self.batches.init(allocator);
 	self.items.init(allocator);
@@ -331,38 +331,38 @@ struct TimelineVk
 fn Timeline? timeline_init_vk(Device* device)
 {
 	vk::SemaphoreTypeCreateInfo timeline_info = {
-		.sType = SEMAPHORE_TYPE_CREATE_INFO,
-		.semaphoreType = TIMELINE,
+		.sType = vk::StructureType.STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+		.semaphoreType = vk::SemaphoreType.SEMAPHORE_TYPE_TIMELINE,
 		.initialValue = 0,
 	};
-	vk::SemaphoreCreateInfo create_info = { .sType = SEMAPHORE_CREATE_INFO };
+	vk::SemaphoreCreateInfo create_info = { .sType = vk::StructureType.STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
 	vk_add_next(&create_info, &timeline_info);
 
 	vk::Semaphore semaphore;
-	vk_check(device.backend.vk.vtable.createSemaphore(device.backend.vk.device, &create_info, null, &semaphore))!;
+	vk_check(vk::vkCreateSemaphore(device.backend.vk.device, &create_info, null, &semaphore))!;
 	return { .signal_value = 0, .backend.vk = { .semaphore = semaphore } };
 }
 
 fn void timeline_deinit_vk(Timeline* t, Device* device)
 {
-	device.backend.vk.vtable.destroySemaphore(device.backend.vk.device, t.backend.vk.semaphore, null);
+	vk::destroySemaphore(device.backend.vk.device, t.backend.vk.semaphore, null);
 	t.backend.vk.semaphore = (vk::Semaphore)0;
 }
 
 fn ulong? timeline_completed_vk(Timeline* t, Device* device)
 {
 	ulong value;
-	vk_check(device.backend.vk.vtable.getSemaphoreCounterValue(device.backend.vk.device, t.backend.vk.semaphore, &value))!;
+	vk_check(vk::vkGetSemaphoreCounterValue(device.backend.vk.device, t.backend.vk.semaphore, &value))!;
 	return value;
 }
 
 fn void? timeline_wait_vk(Timeline* t, Device* device, ulong value)
 {
 	vk::SemaphoreWaitInfo wait_info = {
-		.sType = SEMAPHORE_WAIT_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
 		.semaphoreCount = 1,
 		.pSemaphores = &t.backend.vk.semaphore,
 		.pValues = &value,
 	};
-	return vk_check(device.backend.vk.vtable.waitSemaphores(device.backend.vk.device, &wait_info, ulong::max));
+	return vk_check(vk::vkWaitSemaphores(device.backend.vk.device, &wait_info, ulong::max));
 }

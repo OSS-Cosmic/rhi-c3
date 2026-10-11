@@ -39,7 +39,7 @@ struct ScratchAllocDesc
 
 struct ScratchAlloc
 {
-	Allocator allocator;
+	alloc::Allocator allocator;
 	List{BlockMem} recycle;
 	List{BlockMem} pool;
 	// One-shot blocks for requests > block_size. Freed on reset rather than
@@ -142,10 +142,10 @@ fn ulong scratch_block_device_address(Device* device, Buffer* b) @private
 		if (renderer.backend == VK)
 		{
 			vk::BufferDeviceAddressInfo info = {
-				.sType = vk::StructureType.BUFFER_DEVICE_ADDRESS_INFO,
+				.sType = vk::StructureType.STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
 				.buffer = b.backend.vk.buffer,
 			};
-			return (ulong)device.backend.vk.vtable.getBufferDeviceAddress(device.backend.vk.device, &info);
+			return (ulong)vk::getBufferDeviceAddress(device.backend.vk.device, &info);
 		}
 	$endif
 	return 0;
@@ -197,7 +197,7 @@ fn BlockMem scratch_uniform_alloc_handler(Device* device, ScratchAlloc* scratch,
 
 // ---- lifecycle ------------------------------------------------------------
 
-fn void ScratchAlloc.init(&self, ScratchAllocDesc desc, Allocator allocator = mem)
+fn void ScratchAlloc.init(&self, ScratchAllocDesc desc, alloc::Allocator allocator = mem)
 {
 	*self = { .allocator = allocator };
 	self.recycle.init(allocator);

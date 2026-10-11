@@ -36,8 +36,8 @@ def main(argv):
         )
         return 1
     outdir.mkdir(parents=True, exist_ok=True)
-    cmd = [c3c, "compile", f"examples/{example}/main.c3", "examples/platform/platform.c3", "src/**",
-           "--target", target, "--libdir", ".", "--lib", "vulkan", "-o", str(outdir / example)]
+    cmd = [c3c, "compile", f"examples/{example}/main.c3", "examples/platform/platform.c3", "src/**", "vendor/vulkan.c3l/vk/**",
+           "--target", target, "-o", str(outdir / example)]
     if imgui:
         cmd += ["-D", "RHI_IMGUI"]
     if target == "linux-x64":
@@ -54,7 +54,7 @@ def main(argv):
         ):
             cmd += ["-z", "-framework", "-z", framework]
     if target == "linux-x64":
-        cmd += ["-L", "vendor/lib", "-l", "vma", "-L", "vendor/volk/lib", "-l", "volk", "-l", "stdc++"]
+        cmd += ["-L", "vendor/lib", "-l", "vma", "-l", "stdc++", "-l", "X11-xcb"]
         if imgui:
             cmd += ["-L", "vendor/imgui_c/lib", "-l", "imgui"]
     elif target not in ("wasm32", "macos-aarch64"):

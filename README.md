@@ -22,7 +22,8 @@ and `RHI_HEADLESS` is off. See `HAS_*` consts in `src/rhi/rhi.c3`.
 
 ```text
 src/rhi/        backend-neutral front + per-backend code (vk_*, mtl_*, dx12_*, webgpu, webgl)
-src/vendor/     bindings: vulkan, vma, metal, sdl3, imgui
+src/vendor/     bindings: vma, metal, sdl3, imgui
+vendor/vulkan.c3l/ Vulkan.c3 bindings and runtime loader (submodule)
 vendor/         native sources: VulkanMemoryAllocator, d3d12ma, imgui_c (+ imgui submodule)
 examples/       00_clear .. 05_texture, shared platform harness, slang shaders
 test/           c3 @test functions, mirror src/
@@ -35,7 +36,7 @@ Common:
 
 - C3 0.8 (`c3c`, tested with 0.8.4) on `PATH`, or set `$C3C`.
 - Meson >= 1.1, Python 3, C and C++17 compilers, `ar`.
-- volk submodule (Vulkan loader): `git submodule update --init vendor/volk`
+- Vulkan.c3 submodule: `git submodule update --init vendor/vulkan.c3l`
 - C3 0.8's SDL3 vendor package for native examples and tests:
   `c3c vendor-fetch sdl3`.
 - Dear ImGui submodule, for `03_imgui` and `04_svt`:
@@ -45,8 +46,8 @@ Common:
 
 Per backend:
 
-- **Vulkan**: Vulkan loader/driver at runtime, Vulkan headers to build VMA and volk.
-  volk opens the loader at run time, nothing links libvulkan.
+- **Vulkan**: Vulkan loader/driver at runtime. Vulkan.c3 loads the loader at run
+  time, so nothing links `libvulkan`.
   Initialize VMA with `git submodule update --init vendor/VulkanMemoryAllocator`.
 - **Metal**: macOS arm64, Xcode toolchain. Links `Metal`, `Foundation`,
   `QuartzCore` frameworks and the Objective-C runtime.
@@ -222,15 +223,9 @@ Serve that dir (it holds `index.html`, `glue.js`,
 that compiles is not proof it runs: the bundle must also pass the import and
 lifecycle export checks (`examples/platform/web/bundle_test.mjs`).
 
-## Regenerating Vulkan bindings
+## Vulkan bindings
 
-`src/vendor/vulkan/` is generated and committed.
-
-```sh
-python3 tools/gen_vulkan.py [path/to/vk.xml]   # default /usr/share/vulkan/registry/vk.xml
-```
-
-Output is deterministic: matching registry leaves `git diff` empty.
+Vulkan types, commands, and runtime loading come from the `vendor/vulkan.c3l` submodule.
 
 ## License
 
