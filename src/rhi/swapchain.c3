@@ -203,12 +203,12 @@ fn Swapchain? swapchain_init(Device* device, SwapchainDesc desc, Allocator alloc
 				return swapchain_init_webgl(device, desc, allocator);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void swapchain_deinit(Swapchain* s, Device* device)
 {
-	if (s == null) return;
+	assert(s != null, "swapchain deinit requires an initialized swapchain");
 	switch (renderer.backend)
 	{
 		case VK:
@@ -243,7 +243,8 @@ fn void swapchain_deinit(Swapchain* s, Device* device)
 // reports `OUT_OF_DATE` and the caller retries the recreate.
 fn void? swapchain_recreate(Swapchain* s, Device* device, ushort width, ushort height)
 {
-	if (width == 0 || height == 0) return INITIALIZATION_FAILED~;
+	assert(s != null, "swapchain recreate requires an initialized swapchain");
+	assert(width > 0 && height > 0, "swapchain dimensions must be nonzero");
 	switch (renderer.backend)
 	{
 		case VK:
@@ -265,7 +266,7 @@ fn void? swapchain_recreate(Swapchain* s, Device* device, ushort width, ushort h
 				return swapchain_recreate_webgl(s, device, width, height);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 // Acquire the next image. On `OK`/`SUBOPTIMAL` the image index is written
@@ -276,6 +277,7 @@ fn void? swapchain_recreate(Swapchain* s, Device* device, ushort width, ushort h
 // alongside `.Unsupported_Backend`.
 fn SwapchainStatus? swapchain_acquire_next_image(Swapchain* s, Device* device, uint* out_index)
 {
+	assert(s != null && device != null && out_index != null, "image acquisition requires a swapchain, device, and output index");
 	switch (renderer.backend)
 	{
 		case VK:
@@ -297,13 +299,14 @@ fn SwapchainStatus? swapchain_acquire_next_image(Swapchain* s, Device* device, u
 				return swapchain_acquire_next_image_webgl(s, device, out_index);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 // Borrowed: the swapchain owns what this wraps; never `image_deinit` it.
 // On WebGPU it is only valid between acquire and submit of one frame.
 fn Image swapchain_image(Swapchain* s, uint index)
 {
+	assert(s != null && index < s.image_count, "swapchain image index is out of range");
 	switch (renderer.backend)
 	{
 		case VK:
@@ -332,6 +335,7 @@ fn Image swapchain_image(Swapchain* s, uint index)
 // it. On WebGPU it is only valid between acquire and submit of one frame.
 fn ImageView swapchain_image_view(Swapchain* s, uint index)
 {
+	assert(s != null && index < s.image_count, "swapchain image view index is out of range");
 	switch (renderer.backend)
 	{
 		case VK:
@@ -360,6 +364,7 @@ fn ImageView swapchain_image_view(Swapchain* s, uint index)
 // rendering to the swapchain declares as its colour target.
 fn Format swapchain_color_format(Swapchain* s)
 {
+	assert(s != null && s.image_count > 0, "swapchain format requires an initialized swapchain");
 	switch (renderer.backend)
 	{
 		case VK:
@@ -390,6 +395,9 @@ fn Format swapchain_color_format(Swapchain* s)
 // alongside `.Unsupported_Backend`.
 fn SwapchainStatus? swapchain_frame_submit(Swapchain* s, Device* device, Queue* queue, SwapchainFrameSubmit submit)
 {
+	assert(s != null && device != null && queue != null, "frame submit requires a swapchain, device, and queue");
+	assert(submit.image_index < s.image_count, "frame submit image index is out of range");
+	foreach (cmd : submit.cmds) assert(cmd != null, "frame submit command buffers must be non-null");
 	switch (renderer.backend)
 	{
 		case VK:
@@ -411,7 +419,7 @@ fn SwapchainStatus? swapchain_frame_submit(Swapchain* s, Device* device, Queue* 
 				return swapchain_frame_submit_webgl(s, device, queue, submit);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 // Backend-neutral helpers shared by the web backends. Ungated so native
@@ -419,14 +427,11 @@ fn SwapchainStatus? swapchain_frame_submit(Swapchain* s, Device* device, Queue* 
 
 fn void? swapchain_validate_desc(SwapchainDesc desc)
 {
-	if (desc.width == 0 || desc.height == 0 || desc.queue == null || desc.source.kind == NONE)
-	{
-		return INITIALIZATION_FAILED~;
-	}
-	if (desc.source.kind == SWAPCHAIN && desc.source.swapchain == null)
-	{
-		return INITIALIZATION_FAILED~;
-	}
+	assert(desc.width > 0 && desc.height > 0, "swapchain dimensions must be nonzero");
+	assert(desc.queue != null, "swapchain requires a present queue");
+	assert(desc.source.kind == WINDOW || desc.source.kind == SWAPCHAIN, "swapchain source must be a window or existing swapchain");
+	assert(desc.source.kind != WINDOW || desc.source.window.kind != NONE, "swapchain window source must contain a platform handle");
+	assert(desc.source.kind != SWAPCHAIN || desc.source.swapchain != null, "recreated swapchain source must be non-null");
 }
 
 fn String swapchain_canvas_selector(WindowCanvas c)
@@ -572,11 +577,7 @@ struct SwapchainMtl
 
 fn Swapchain? swapchain_init_mtl(Device* device, SwapchainDesc desc, Allocator allocator = mem)
 {
-	if (device == null || !device.backend.mtl.device || desc.queue == null ||
-		desc.width == 0 || desc.height == 0)
-	{
-		return INITIALIZATION_FAILED~;
-	}
+	assert(device != null && device.backend.mtl.device, "Metal swapchain requires an initialized device");
 
 	mtl::CAMetalLayer layer = null;
 	bool move_layer = false;
@@ -592,7 +593,7 @@ fn Swapchain? swapchain_init_mtl(Device* device, SwapchainDesc desc, Allocator a
 	else if (desc.source.kind == SWAPCHAIN)
 	{
 		Swapchain* old = desc.source.swapchain;
-		if (old == null || !old.backend.mtl.layer) return INITIALIZATION_FAILED~;
+		assert(old != null && old.backend.mtl.layer, "Metal swapchain recreation requires a live source layer");
 		layer = old.backend.mtl.layer;
 		move_layer = true;
 	}
@@ -648,7 +649,7 @@ fn Swapchain? swapchain_init_mtl(Device* device, SwapchainDesc desc, Allocator a
 
 fn void swapchain_deinit_mtl(Swapchain* s, Device* device)
 {
-	if (s == null) return;
+	assert(s != null, "Metal swapchain deinit requires an initialized swapchain");
 	if (s.backend.mtl.current_drawable)
 	{
 		s.backend.mtl.current_drawable.release();
@@ -664,10 +665,8 @@ fn void swapchain_deinit_mtl(Swapchain* s, Device* device)
 
 fn void? swapchain_recreate_mtl(Swapchain* s, Device* device, ushort width, ushort height)
 {
-	if (s == null || !s.backend.mtl.layer || width == 0 || height == 0)
-	{
-		return INITIALIZATION_FAILED~;
-	}
+	assert(s != null && s.backend.mtl.layer, "Metal recreate requires an initialized swapchain");
+	assert(width > 0 && height > 0, "swapchain dimensions must be nonzero");
 	if (s.backend.mtl.current_drawable)
 	{
 		s.backend.mtl.current_drawable.release();
@@ -684,7 +683,7 @@ fn void? swapchain_recreate_mtl(Swapchain* s, Device* device, ushort width, usho
 
 fn SwapchainStatus? swapchain_acquire_next_image_mtl(Swapchain* s, Device* device, uint* out_index)
 {
-	if (s == null || out_index == null || !s.backend.mtl.layer) return INITIALIZATION_FAILED~;
+	assert(s != null && out_index != null && s.backend.mtl.layer, "Metal acquire requires a swapchain, layer, and output index");
 	objc::@autoreleasepool()
 	{
 		if (s.backend.mtl.current_drawable)
@@ -703,9 +702,9 @@ fn SwapchainStatus? swapchain_acquire_next_image_mtl(Swapchain* s, Device* devic
 
 fn Image swapchain_image_mtl(Swapchain* s, uint index)
 {
-	if (s == null || index != 0 || !s.backend.mtl.current_drawable) return {};
+	assert(s != null && index == 0 && s.backend.mtl.current_drawable, "Metal swapchain image is only available after acquiring image zero");
 	mtl::Texture texture = s.backend.mtl.current_drawable.texture();
-	if (!texture) return {};
+	assert(texture, "acquired Metal drawable has no texture");
 	return {
 		.cookie = next_cookie(),
 		.backend.mtl = {
@@ -726,9 +725,9 @@ fn Image swapchain_image_mtl(Swapchain* s, uint index)
 
 fn ImageView swapchain_image_view_mtl(Swapchain* s, uint index)
 {
-	if (s == null || index != 0 || !s.backend.mtl.current_drawable) return {};
+	assert(s != null && index == 0 && s.backend.mtl.current_drawable, "Metal swapchain view is only available after acquiring image zero");
 	mtl::Texture texture = s.backend.mtl.current_drawable.texture();
-	if (!texture) return {};
+	assert(texture, "acquired Metal drawable has no texture");
 	return {
 		.cookie = next_cookie(),
 		.backend.mtl = {
@@ -742,10 +741,7 @@ fn ImageView swapchain_image_view_mtl(Swapchain* s, uint index)
 
 fn SwapchainStatus? swapchain_frame_submit_mtl(Swapchain* s, Device* device, Queue* queue, SwapchainFrameSubmit submit)
 {
-	if (s == null || device == null || queue == null || submit.image_index != 0)
-	{
-		return INITIALIZATION_FAILED~;
-	}
+	assert(s != null && device != null && queue != null && submit.image_index == 0, "Metal submit requires a swapchain, device, queue, and image zero");
 	mtl::CAMetalDrawable drawable = s.backend.mtl.current_drawable;
 	if (!drawable) return OUT_OF_DATE~;
 
@@ -872,9 +868,10 @@ fn vk::SurfaceKHR? swapchain_create_surface_vk(WindowHandle handle) @private
 	{
 		case X11:
 			$if env::LINUX:
-				if (!handle.x11.display || !vk::createXlibSurfaceKHR) return INITIALIZATION_FAILED~;
+				assert(handle.x11.display != null && handle.x11.window != 0, "X11 swapchain requires a display and window");
+				if (!vk::createXlibSurfaceKHR) return INITIALIZATION_FAILED~;
 				vk::XlibSurfaceCreateInfoKHR info = {
-					.sType = vk::StructureType.XLIB_SURFACE_CREATE_INFO_KHR,
+					.sType = (vk::StructureType)1000004000,
 					.dpy = (vk::XlibDisplay*)handle.x11.display,
 					.window = (vk::XlibWindow)handle.x11.window,
 				};
@@ -884,9 +881,10 @@ fn vk::SurfaceKHR? swapchain_create_surface_vk(WindowHandle handle) @private
 			$endif
 		case WAYLAND:
 			$if env::LINUX:
-				if (!handle.wayland.display || !handle.wayland.surface || !vk::createWaylandSurfaceKHR) return INITIALIZATION_FAILED~;
+				assert(handle.wayland.display != null && handle.wayland.surface != null, "Wayland swapchain requires a display and surface");
+				if (!vk::createWaylandSurfaceKHR) return INITIALIZATION_FAILED~;
 				vk::WaylandSurfaceCreateInfoKHR info = {
-					.sType = vk::StructureType.WAYLAND_SURFACE_CREATE_INFO_KHR,
+					.sType = (vk::StructureType)1000006000,
 					.display = (vk::WlDisplay*)handle.wayland.display,
 					.surface = (vk::WlSurface*)handle.wayland.surface,
 				};
@@ -896,11 +894,12 @@ fn vk::SurfaceKHR? swapchain_create_surface_vk(WindowHandle handle) @private
 			$endif
 		case WIN32:
 			$if env::WIN32:
-				if (!handle.win32.hwnd || !vk::createWin32SurfaceKHR) return INITIALIZATION_FAILED~;
+				assert(handle.win32.hwnd != null, "Win32 swapchain requires a window handle");
+				if (!vk::createWin32SurfaceKHR) return INITIALIZATION_FAILED~;
 				vk::Hinstance hinstance = (vk::Hinstance)handle.win32.hinstance;
 				if (!hinstance) hinstance = vk_get_module_handle_w(null);
 				vk::Win32SurfaceCreateInfoKHR info = {
-					.sType = vk::StructureType.WIN32_SURFACE_CREATE_INFO_KHR,
+					.sType = vk::StructureType.vk::WIN32_SURFACE_CREATE_INFO_KHR,
 					.hinstance = hinstance,
 					.hwnd = (vk::Hwnd)handle.win32.hwnd,
 				};
@@ -959,16 +958,16 @@ fn void swapchain_release_vk(SwapchainVk* v, Device* device, bool destroy_surfac
 {
 	for (uint i = 0; i < MAX_SWAPCHAIN_IMAGES; i++)
 	{
-		if (v.acquire_semaphores[i].backend.vk.semaphore != 0) semaphore_deinit_vk(&v.acquire_semaphores[i], device);
-		if (v.present_semaphores[i].backend.vk.semaphore != 0) semaphore_deinit_vk(&v.present_semaphores[i], device);
-		if (v.acquire_fences[i] != 0) device.backend.vk.vtable.destroyFence(device.backend.vk.device, v.acquire_fences[i], null);
-		v.acquire_fences[i] = 0;
+		if (v.acquire_semaphores[i].backend.vk.semaphore != (vk::Semaphore)0) semaphore_deinit_vk(&v.acquire_semaphores[i], device);
+		if (v.present_semaphores[i].backend.vk.semaphore != (vk::Semaphore)0) semaphore_deinit_vk(&v.present_semaphores[i], device);
+		if (v.acquire_fences[i] != (vk::Fence)0) device.backend.vk.vtable.destroyFence(device.backend.vk.device, v.acquire_fences[i], null);
+		v.acquire_fences[i] = (vk::Fence)0;
 		v.acquire_wait_timeline[i] = null;
 		v.acquire_wait_value[i] = 0;
 		v.acquire_pending[i] = false;
-		if (v.views[i].backend.vk.view != 0) image_view_deinit_vk(&v.views[i], device);
+		if (v.views[i].backend.vk.view != (vk::ImageView)0) image_view_deinit_vk(&v.views[i], device);
 		v.views[i] = {};
-		v.images[i] = 0;
+		v.images[i] = (vk::Image)0;
 		v.image_cookies[i] = 0;
 	}
 	if (v.swapchain != 0)
@@ -982,7 +981,7 @@ fn void swapchain_release_vk(SwapchainVk* v, Device* device, bool destroy_surfac
 
 fn Swapchain? swapchain_init_vk(Device* device, SwapchainDesc desc, Allocator allocator = mem)
 {
-	if (device == null || desc.queue == null || desc.width == 0 || desc.height == 0) return INITIALIZATION_FAILED~;
+	assert(device != null, "Vulkan swapchain requires an initialized device");
 	vk::PhysicalDevice physical = device.adapter.backend.vk.physical_device;
 	vk::DeviceVTable* vtable = &device.backend.vk.vtable;
 
@@ -1060,7 +1059,7 @@ fn Swapchain? swapchain_init_vk(Device* device, SwapchainDesc desc, Allocator al
 	}
 
 	vk::SwapchainCreateInfoKHR create_info = {
-		.sType = vk::StructureType.SWAPCHAIN_CREATE_INFO_KHR,
+		.sType = (vk::StructureType)1000001000,
 		.surface = v.surface,
 		.minImageCount = image_count,
 		.imageFormat = v.format,
@@ -1088,7 +1087,7 @@ fn Swapchain? swapchain_init_vk(Device* device, SwapchainDesc desc, Allocator al
 			.cookie = v.image_cookies[i],
 			.backend.vk = { .image = v.images[i], .format = v.format, .borrowed = true },
 		};
-		v.views[i] = image_view_init_vk(device, &image, {
+		v.views[i] = image_view_init(device, &image, {
 			.view_type = COLOR_ATTACHMENT,
 			.format = from_vk_format(v.format),
 			.aspect = COLOR,
@@ -1116,13 +1115,14 @@ fn Swapchain? swapchain_init_vk(Device* device, SwapchainDesc desc, Allocator al
 
 fn void swapchain_deinit_vk(Swapchain* s, Device* device)
 {
-	if (s == null) return;
+	assert(s != null, "Vulkan swapchain deinit requires an initialized swapchain");
 	swapchain_release_vk(&s.backend.vk, device, true);
 }
 
 fn void? swapchain_recreate_vk(Swapchain* s, Device* device, ushort width, ushort height)
 {
-	if (s == null) return INITIALIZATION_FAILED~;
+	assert(s != null, "Vulkan recreate requires an initialized swapchain");
+	assert(width > 0 && height > 0, "swapchain dimensions must be nonzero");
 	Swapchain? next = swapchain_init_vk(device, {
 		.width = width,
 		.height = height,
@@ -1137,7 +1137,7 @@ fn void? swapchain_recreate_vk(Swapchain* s, Device* device, ushort width, ushor
 
 fn SwapchainStatus? swapchain_acquire_next_image_vk(Swapchain* s, Device* device, uint* out_index)
 {
-	if (s == null || device == null || out_index == null || s.image_count == 0) return INITIALIZATION_FAILED~;
+	assert(s != null && device != null && out_index != null && s.image_count > 0, "Vulkan acquire requires an initialized swapchain, device, and output index");
 	SwapchainVk* v = &s.backend.vk;
 	v.acquire_idx = (v.acquire_idx + 1) % s.image_count;
 	uint acquire_idx = v.acquire_idx;
@@ -1161,18 +1161,20 @@ fn SwapchainStatus? swapchain_acquire_next_image_vk(Swapchain* s, Device* device
 	uint index;
 	vk::Result result = device.backend.vk.vtable.acquireNextImageKHR(
 		device.backend.vk.device, v.swapchain, ulong::max,
-		v.acquire_semaphores[acquire_idx].backend.vk.semaphore, 0, &index);
+		v.acquire_semaphores[acquire_idx].backend.vk.semaphore, (vk::Fence)0, &index);
 	switch (result)
 	{
 		case vk::Result.SUCCESS:
+			assert(index < s.image_count, "Vulkan returned an out-of-range swapchain image index");
 			v.image_acquire_idx[index] = acquire_idx;
 			*out_index = index;
 			return OK;
-		case vk::Result.SUBOPTIMAL_KHR:
+		case (vk::Result)1000001003:
+			assert(index < s.image_count, "Vulkan returned an out-of-range swapchain image index");
 			v.image_acquire_idx[index] = acquire_idx;
 			*out_index = index;
 			return SUBOPTIMAL;
-		case vk::Result.ERROR_OUT_OF_DATE_KHR:
+		case (vk::Result)-1000001004:
 			return OUT_OF_DATE;
 	}
 	vk_check(result)!;
@@ -1181,7 +1183,7 @@ fn SwapchainStatus? swapchain_acquire_next_image_vk(Swapchain* s, Device* device
 
 fn Image swapchain_image_vk(Swapchain* s, uint index)
 {
-	assert(s != null && index < s.image_count);
+	assert(s != null && index < s.image_count, "Vulkan swapchain image index is out of range");
 	SwapchainVk* v = &s.backend.vk;
 	return {
 		.cookie = v.image_cookies[index],
@@ -1191,7 +1193,7 @@ fn Image swapchain_image_vk(Swapchain* s, uint index)
 
 fn ImageView swapchain_image_view_vk(Swapchain* s, uint index)
 {
-	assert(s != null && index < s.image_count);
+	assert(s != null && index < s.image_count, "Vulkan swapchain view index is out of range");
 	ImageView view = s.backend.vk.views[index];
 	return {
 		.cookie = view.cookie,
@@ -1201,7 +1203,8 @@ fn ImageView swapchain_image_view_vk(Swapchain* s, uint index)
 
 fn SwapchainStatus? swapchain_frame_submit_vk(Swapchain* s, Device* device, Queue* queue, SwapchainFrameSubmit submit)
 {
-	if (s == null || device == null || queue == null || submit.image_index >= s.image_count) return INITIALIZATION_FAILED~;
+	assert(s != null && device != null && queue != null, "Vulkan submit requires a swapchain, device, and queue");
+	assert(submit.image_index < s.image_count, "Vulkan submit image index is out of range");
 	SwapchainVk* v = &s.backend.vk;
 	uint acquire_idx = v.image_acquire_idx[submit.image_index];
 	Semaphore* acquire = &v.acquire_semaphores[acquire_idx];
@@ -1213,7 +1216,7 @@ fn SwapchainStatus? swapchain_frame_submit_vk(Swapchain* s, Device* device, Queu
 	TimelineOp[1] signal_ops = { { .timeline = submit.timeline, .value = swapchain_frame_signal_value(submit) } };
 	TimelineOp[] signals = {};
 	if (submit.timeline) signals = signal_ops[..];
-	bool has_completion_fence = submit.completion != null && submit.completion.backend.vk.fence != 0;
+	bool has_completion_fence = submit.completion != null && submit.completion.backend.vk.fence != (vk::Fence)0;
 	vk::Fence fallback_fence = !submit.timeline && !has_completion_fence ? v.acquire_fences[acquire_idx] : 0;
 	queue_submit_vk(queue, device, {
 		.cmds = submit.cmds,
@@ -1237,7 +1240,7 @@ fn SwapchainStatus? swapchain_frame_submit_vk(Swapchain* s, Device* device, Queu
 	vk::Semaphore present_semaphore = present.backend.vk.semaphore;
 	uint image_index = submit.image_index;
 	vk::PresentInfoKHR present_info = {
-		.sType = vk::StructureType.PRESENT_INFO_KHR,
+		.sType = (vk::StructureType)1000001001,
 		.waitSemaphoreCount = 1,
 		.pWaitSemaphores = &present_semaphore,
 		.swapchainCount = 1,
@@ -1248,8 +1251,8 @@ fn SwapchainStatus? swapchain_frame_submit_vk(Swapchain* s, Device* device, Queu
 	switch (result)
 	{
 		case vk::Result.SUCCESS: return OK;
-		case vk::Result.SUBOPTIMAL_KHR: return SUBOPTIMAL;
-		case vk::Result.ERROR_OUT_OF_DATE_KHR: return OUT_OF_DATE;
+		case (vk::Result)1000001003: return SUBOPTIMAL;
+		case (vk::Result)-1000001004: return OUT_OF_DATE;
 	}
 	vk_check(result)!;
 	return OK;

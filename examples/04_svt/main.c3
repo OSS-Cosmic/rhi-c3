@@ -14,7 +14,7 @@ import std::math;
 import imgui;
 import platform;
 import rhi;
-import sdl3;
+import sdl3_compat;
 
 // The compact C3 ImGui binding intentionally exposes only the calls shared by
 // the demos; keep this layout primitive local so the demo does not widen the
@@ -477,7 +477,7 @@ fn void svt_draw_imgui()
 	imgui::text("Software virtual texturing");
 	if (imgui::checkbox("Fly camera (Esc to release)", &state.fly_mode))
 	{
-		(void)sdl3::set_window_relative_mouse_mode(state.window.handle, state.fly_mode);
+		(void)sdl3_compat::set_window_relative_mouse_mode(state.window.handle, state.fly_mode);
 	}
 	imgui::text("WASD move, Q/E down/up, mouse look");
 	imgui::slider_float("Move speed", &state.move_speed, 2, 80, "%.1f", 0);
@@ -630,12 +630,12 @@ fn void camera_matrix(float aspect, float dt, float[16]* out)
 		float rl = math::sqrt(right[0] * right[0] + right[2] * right[2]);
 		if (rl > 0) { right[0] /= rl; right[2] /= rl; }
 		float[3] velocity = {};
-			if (state.keys[sdl3::SDL_SCANCODE_W]) for (uint i = 0; i < 3; i++) velocity[i] += forward[i];
-			if (state.keys[sdl3::SDL_SCANCODE_S]) for (uint i = 0; i < 3; i++) velocity[i] -= forward[i];
-			if (state.keys[sdl3::SDL_SCANCODE_D]) for (uint i = 0; i < 3; i++) velocity[i] += right[i];
-			if (state.keys[sdl3::SDL_SCANCODE_A]) for (uint i = 0; i < 3; i++) velocity[i] -= right[i];
-			if (state.keys[sdl3::SDL_SCANCODE_E]) velocity[1] += 1;
-			if (state.keys[sdl3::SDL_SCANCODE_Q]) velocity[1] -= 1;
+			if (state.keys[sdl3_compat::SDL_SCANCODE_W]) for (uint i = 0; i < 3; i++) velocity[i] += forward[i];
+			if (state.keys[sdl3_compat::SDL_SCANCODE_S]) for (uint i = 0; i < 3; i++) velocity[i] -= forward[i];
+			if (state.keys[sdl3_compat::SDL_SCANCODE_D]) for (uint i = 0; i < 3; i++) velocity[i] += right[i];
+			if (state.keys[sdl3_compat::SDL_SCANCODE_A]) for (uint i = 0; i < 3; i++) velocity[i] -= right[i];
+			if (state.keys[sdl3_compat::SDL_SCANCODE_E]) velocity[1] += 1;
+			if (state.keys[sdl3_compat::SDL_SCANCODE_Q]) velocity[1] -= 1;
 		for (uint i = 0; i < 3; i++) state.camera_position[i] += velocity[i] * state.move_speed * dt;
 		eye = state.camera_position;
 		for (uint i = 0; i < 3; i++) target[i] = eye[i] + forward[i];
@@ -719,8 +719,8 @@ fn void? svt_frame()
 		{ .location = 1, .binding = 0, .format = rhi::Format.RG32_SFLOAT, .offset = 12 },
 	};
 	rhi::Viewport viewport = { .width = width, .height = height, .max_depth = 1 };
-	rhi::Rect scissor = { .width = width, .height = height };
-	rhi::cmd_begin_rendering(cmd, &state.device, { .render_area = { .width = width, .height = height } });
+	std::math::geometry::Rect scissor = { .width = (float)width, .height = (float)height };
+	rhi::cmd_begin_rendering(cmd, &state.device, { .render_area = { .width = (float)width, .height = (float)height } });
 	rhi::cmd_set_viewport(cmd, &state.device, viewport);
 	rhi::cmd_set_scissor(cmd, &state.device, scissor);
 	rhi::program_bind_pipeline(&state.feedback_program, &state.device, cmd, 1, { .topology = rhi::PrimitiveTopology.TRIANGLE_LIST, .cull_mode = rhi::CullMode.NONE, .front_face = rhi::FrontFace.CLOCKWISE, .depth_compare = rhi::CompareOp.ALWAYS, .vertex_streams = streams[..], .vertex_attributes = attributes[..] })!;
@@ -734,9 +734,9 @@ fn void? svt_frame()
 	rhi::Image image = rhi::swapchain_image(&state.swapchain, image_index);
 	rhi::ImageView view = rhi::swapchain_image_view(&state.swapchain, image_index);
 	rhi::cmd_image_barrier(cmd, &state.device, { .image = &image, .after = { .render_target = true }, .aspect = rhi::BarrierAspect.COLOR, .mip_count = 1, .layer_count = 1 });
-	rhi::imgui_layer_new_frame(&state.imgui, width, height, state.frame_dt);
+	rhi::imgui_layer_new_frame(&state.imgui, width, height, state.frame_dt, 1, 1);
 	svt_draw_imgui();
-	rhi::cmd_begin_rendering(cmd, &state.device, { .color_attachments = { { .view = view, .load_op = rhi::LoadOp.CLEAR, .store_op = rhi::StoreOp.STORE, .clear_color = { 0, 0, 0.05, 1 } } }, .render_area = { .width = width, .height = height } });
+	rhi::cmd_begin_rendering(cmd, &state.device, { .color_attachments = { { .view = view, .load_op = rhi::LoadOp.CLEAR, .store_op = rhi::StoreOp.STORE, .clear_color = { 0, 0, 0.05, 1 } } }, .render_area = { .width = (float)width, .height = (float)height } });
 	rhi::cmd_set_viewport(cmd, &state.device, viewport);
 	rhi::cmd_set_scissor(cmd, &state.device, scissor);
 	rhi::program_bind_pipeline(&state.composite_program, &state.device, cmd, 2 | ((ulong)rhi::swapchain_color_format(&state.swapchain) << 8), { .topology = rhi::PrimitiveTopology.TRIANGLE_LIST, .cull_mode = rhi::CullMode.NONE, .front_face = rhi::FrontFace.CLOCKWISE, .depth_compare = rhi::CompareOp.ALWAYS, .colors = { { .format = rhi::swapchain_color_format(&state.swapchain) } }, .vertex_streams = streams[..], .vertex_attributes = attributes[..] })!;
@@ -777,9 +777,9 @@ fn platform::AppResult svt_app_frame()
 fn platform::AppResult svt_event(platform::Event* event)
 {
 	uint type = event.common.type;
-	if (type == sdl3::SDL_EVENT_MOUSE_MOTION)
+	if (type == sdl3_compat::SDL_EVENT_MOUSE_MOTION)
 	{
-		sdl3::MouseMotionEvent* motion = (sdl3::MouseMotionEvent*)event;
+		sdl3_compat::MouseMotionEvent* motion = (sdl3_compat::MouseMotionEvent*)event;
 		rhi::imgui_layer_add_mouse_pos_event(&state.imgui, motion.x, motion.y);
 		if (state.fly_mode)
 		{
@@ -787,25 +787,25 @@ fn platform::AppResult svt_event(platform::Event* event)
 			state.camera_pitch = (float)max(-1.5, min(1.5, (double)state.camera_pitch - motion.yrel * 0.0025));
 		}
 	}
-	else if (type == sdl3::SDL_EVENT_MOUSE_WHEEL)
+	else if (type == sdl3_compat::SDL_EVENT_MOUSE_WHEEL)
 	{
-		sdl3::MouseWheelEvent* wheel = (sdl3::MouseWheelEvent*)event;
+		sdl3_compat::MouseWheelEvent* wheel = (sdl3_compat::MouseWheelEvent*)event;
 		rhi::imgui_layer_add_mouse_wheel_event(&state.imgui, wheel.x, wheel.y);
 	}
-	else if (type == sdl3::SDL_EVENT_MOUSE_BUTTON_DOWN || type == sdl3::SDL_EVENT_MOUSE_BUTTON_UP)
+	else if (type == sdl3_compat::SDL_EVENT_MOUSE_BUTTON_DOWN || type == sdl3_compat::SDL_EVENT_MOUSE_BUTTON_UP)
 	{
-		sdl3::MouseButtonEvent* button = (sdl3::MouseButtonEvent*)event;
-		int mapped = button.button == sdl3::SDL_BUTTON_LEFT ? 0 : button.button == sdl3::SDL_BUTTON_RIGHT ? 1 : button.button == sdl3::SDL_BUTTON_MIDDLE ? 2 : -1;
-		if (mapped >= 0) rhi::imgui_layer_add_mouse_button_event(&state.imgui, mapped, type == sdl3::SDL_EVENT_MOUSE_BUTTON_DOWN);
+		sdl3_compat::MouseButtonEvent* button = (sdl3_compat::MouseButtonEvent*)event;
+		int mapped = button.button == sdl3_compat::SDL_BUTTON_LEFT ? 0 : button.button == sdl3_compat::SDL_BUTTON_RIGHT ? 1 : button.button == sdl3_compat::SDL_BUTTON_MIDDLE ? 2 : -1;
+		if (mapped >= 0) rhi::imgui_layer_add_mouse_button_event(&state.imgui, mapped, type == sdl3_compat::SDL_EVENT_MOUSE_BUTTON_DOWN);
 	}
-	else if (type == sdl3::SDL_EVENT_KEY_DOWN || type == sdl3::SDL_EVENT_KEY_UP)
+	else if (type == sdl3_compat::SDL_EVENT_KEY_DOWN || type == sdl3_compat::SDL_EVENT_KEY_UP)
 	{
-		sdl3::KeyboardEvent* key = (sdl3::KeyboardEvent*)event;
-		if (key.scancode < state.keys.len) state.keys[key.scancode] = type == sdl3::SDL_EVENT_KEY_DOWN;
-		if (type == sdl3::SDL_EVENT_KEY_DOWN && key.scancode == sdl3::SDL_SCANCODE_ESCAPE && state.fly_mode)
+		sdl3_compat::KeyboardEvent* key = (sdl3_compat::KeyboardEvent*)event;
+		if (key.scancode < state.keys.len) state.keys[key.scancode] = type == sdl3_compat::SDL_EVENT_KEY_DOWN;
+		if (type == sdl3_compat::SDL_EVENT_KEY_DOWN && key.scancode == sdl3_compat::SDL_SCANCODE_ESCAPE && state.fly_mode)
 		{
 			state.fly_mode = false;
-			(void)sdl3::set_window_relative_mouse_mode(state.window.handle, false);
+			(void)sdl3_compat::set_window_relative_mouse_mode(state.window.handle, false);
 		}
 	}
 	return platform::AppResult.CONTINUE;

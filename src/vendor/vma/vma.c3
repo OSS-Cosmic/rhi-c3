@@ -1,10 +1,9 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// C3 bindings for AMD's Vulkan Memory Allocator (VMA) v3.3.0, ported from
-// the VMA C API. The matching header and implementation are vendored
-// locally in c3/vendor/vma/include/vk_mem_alloc.h and
-// c3/vendor/vma/vma_impl.cpp.
+// C3 bindings for AMD's Vulkan Memory Allocator (VMA) v3.4.0, ported from
+// the VMA C API. The matching header comes from the
+// vendor/VulkanMemoryAllocator submodule; vendor/vma_impl.cpp builds it.
 //
 // The struct layouts below must match the C header byte-for-byte: every
 // field the C++ side reads or writes has to line up, in order, with no gaps
@@ -53,7 +52,7 @@ const AllocationCreateFlags ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT  
 const AllocationCreateFlags ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT                 = 0x00000800;
 const AllocationCreateFlags ALLOCATION_CREATE_HOST_ACCESS_ALLOW_TRANSFER_INSTEAD_BIT = 0x00001000;
 
-// VmaVulkanFunctions, full field set and order for v3.3.0 built against a
+// VmaVulkanFunctions, full field set and order for v3.4.0 built against a
 // Vulkan >= 1.3 SDK (VK_KHR_dedicated_allocation, VK_KHR_bind_memory2,
 // VK_EXT_memory_budget and VK_KHR_maintenance4 are all promoted to core by
 // then, so every conditional field in the header is compiled in).
@@ -89,6 +88,7 @@ struct VulkanFunctions
 	// preserve the field's slot in the C struct layout (a `void*` in C unless
 	// VMA_EXTERNAL_MEMORY_WIN32, pointer-sized either way).
 	vk::ProcGetMemoryWin32HandleKHR get_memory_win32_handle_khr;
+	vk::ProcGetPhysicalDeviceProperties2KHR get_physical_device_properties2_khr;
 }
 
 // VmaAllocatorCreateInfo.
@@ -133,7 +133,7 @@ struct AllocationInfo
 }
 
 // Build it locally with `meson compile -C build-meson` from the repository root.
-// Then `c3c test -z -lSDL3` links libvma.a and the C++ runtime.
+// Then `c3c test -z -lSDL3` links vendor/lib/libvma.a and the C++ runtime.
 extern fn vk::Result create_allocator(AllocatorCreateInfo* create_info, Allocator* allocator) @cname("vmaCreateAllocator");
 extern fn void destroy_allocator(Allocator allocator) @cname("vmaDestroyAllocator");
 extern fn vk::Result create_buffer(Allocator allocator, vk::BufferCreateInfo* buffer_create_info, AllocationCreateInfo* allocation_create_info, vk::Buffer* buffer, Allocation* allocation, AllocationInfo* allocation_info) @cname("vmaCreateBuffer");

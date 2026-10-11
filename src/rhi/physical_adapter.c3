@@ -628,8 +628,8 @@ fn List{PhysicalAdapter}? enumerate_adapters_vk(Allocator allocator = mem)
 		vk::PhysicalDeviceVulkan12Properties props12 = { .sType = PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES };
 		vk::PhysicalDeviceVulkan13Properties props13 = { .sType = PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES };
 		vk::PhysicalDeviceIDProperties device_id_properties = { .sType = PHYSICAL_DEVICE_ID_PROPERTIES };
-		vk::PhysicalDeviceAccelerationStructurePropertiesKHR accel_structure_properties = { .sType = PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR };
-		vk::PhysicalDeviceRayTracingPipelinePropertiesKHR ray_tracing_pipeline_properties = { .sType = PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR };
+		vk::PhysicalDeviceAccelerationStructurePropertiesKHR accel_structure_properties = { .sType = (vk::StructureType)1000150014 };
+		vk::PhysicalDeviceRayTracingPipelinePropertiesKHR ray_tracing_pipeline_properties = { .sType = (vk::StructureType)1000347001 };
 
 		vk_add_next(&properties, &props11);
 		vk_add_next(&properties, &props12);
@@ -642,10 +642,10 @@ fn List{PhysicalAdapter}? enumerate_adapters_vk(Allocator allocator = mem)
 		vk::PhysicalDeviceVulkan11Features features11 = { .sType = PHYSICAL_DEVICE_VULKAN_1_1_FEATURES };
 		vk::PhysicalDeviceVulkan12Features features12 = { .sType = PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
 		vk::PhysicalDeviceVulkan13Features features13 = { .sType = PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
-		vk::PhysicalDevicePresentIdFeaturesKHR present_id_features = { .sType = PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR };
-		vk::PhysicalDeviceAccelerationStructureFeaturesKHR accel_structure_features = { .sType = PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
-		vk::PhysicalDeviceRayTracingPipelineFeaturesKHR ray_tracing_pipeline_features = { .sType = PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR };
-		vk::PhysicalDeviceRayQueryFeaturesKHR ray_query_features = { .sType = PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
+		vk::PhysicalDevicePresentIdFeaturesKHR present_id_features = { .sType = (vk::StructureType)1000294001 };
+		vk::PhysicalDeviceAccelerationStructureFeaturesKHR accel_structure_features = { .sType = (vk::StructureType)1000150013 };
+		vk::PhysicalDeviceRayTracingPipelineFeaturesKHR ray_tracing_pipeline_features = { .sType = (vk::StructureType)1000347000 };
+		vk::PhysicalDeviceRayQueryFeaturesKHR ray_query_features = { .sType = (vk::StructureType)1000348013 };
 
 		vk_add_next(&features, &features11);
 		vk_add_next(&features, &features12);

@@ -10,7 +10,7 @@ manifests. C3 builds use only files beneath this directory.
 | `00_clear` | Swapchain clear and image barriers; four quadrant clears on native backends. | — | Vulkan, Metal, WebGPU, WebGL2 |
 | `01_shader` | Fullscreen vertex-id triangle rendering a Mandelbrot set. | `01_shader/shaders.txt` | Vulkan, Metal, WebGPU, WebGL2 |
 | `02_mesh` | Rotating indexed cube with a depth attachment and push constants. | `02_mesh/shaders.txt` | Vulkan, Metal, WebGPU, WebGL2 |
-| `03_imgui` | Dear ImGui demo window and an `rhi` status window. | — | Native only; requires ImGui integration |
+| `03_imgui` | Dear ImGui demo window and an `rhi` status window. | `03_imgui/shaders.txt` | Vulkan, Metal; requires ImGui integration |
 | `04_svt` | Feedback-driven software virtual texturing with an atlas, page table, and ImGui controls. | `04_svt/shaders.txt` | Native only; requires ImGui integration |
 | `05_texture` | Alpha-blended textured quad with named texture and sampler bindings. | `05_texture/shaders.txt` | WebGPU/WebGL2 |
 
@@ -48,7 +48,8 @@ the platform glue and bundle assets included here.
   system development link or the runtime-library symlink created by the root
   build helper must be available.
 - VMA for Vulkan allocations. From the repository root,
-  `meson compile -C build-meson` creates `vendor/vma/lib/libvma.a`.
+  initialize `vendor/VulkanMemoryAllocator` with Git submodules and run
+  `meson compile -C build-meson` to create `vendor/lib/libvma.a`.
 - Dear ImGui for `03_imgui` and `04_svt`: initialize the `vendor/imgui_c/imgui`
   submodule (`git submodule update --init vendor/imgui_c/imgui`), then run
   `meson compile -C build-meson`. The examples are native-only and the runner
@@ -66,6 +67,7 @@ meson test -C build-meson                   # C3 @test functions on the host
 meson compile -C build-meson check          # C3 static library: all targets
 meson compile -C build-meson web            # browser bundles: 00, 01, 02, 05
 meson compile -C build-meson vulkan         # native Vulkan examples 00-04
+meson compile -C build-meson metal-03_imgui # macOS Metal ImGui demo
 c3c build --target linux-x64                # one C3 target directly
 c3c test                                    # C3 tests directly
 ```

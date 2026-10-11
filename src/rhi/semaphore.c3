@@ -43,7 +43,7 @@ fn Semaphore? semaphore_init(Device* device)
 			// Nothing to create; see the file header.
 			return {};
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void semaphore_deinit(Semaphore* s, Device* device)
@@ -104,5 +104,5 @@ fn Semaphore? semaphore_init_vk(Device* device)
 fn void semaphore_deinit_vk(Semaphore* s, Device* device)
 {
 	device.backend.vk.vtable.destroySemaphore(device.backend.vk.device, s.backend.vk.semaphore, null);
-	s.backend.vk.semaphore = 0;
+	s.backend.vk.semaphore = (vk::Semaphore)0;
 }

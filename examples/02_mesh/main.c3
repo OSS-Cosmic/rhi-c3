@@ -15,17 +15,6 @@ import rhi;
 const int FRAMES_IN_FLIGHT = 3;
 const rhi::Format DEPTH_FORMAT = rhi::Format.D32_SFLOAT;
 
-// The C3 shader manifest builds these blobs before the example is checked or
-// run. Vulkan consumes SPIR-V and Metal consumes generated MSL.
-const char[*] MESH_VERTEX_SPV @align(4) = $embed("../../build/examples/02_mesh/shaders/02_mesh.vert.spv");
-const char[*] MESH_FRAGMENT_SPV @align(4) = $embed("../../build/examples/02_mesh/shaders/02_mesh.frag.spv");
-const char[*] MESH_VERTEX_MSL = $embed("../../build/examples/02_mesh/shaders/02_mesh.vert.metal");
-const char[*] MESH_FRAGMENT_MSL = $embed("../../build/examples/02_mesh/shaders/02_mesh.frag.metal");
-const char[*] MESH_VERTEX_WGSL = $embed("../../build/examples/02_mesh/shaders/02_mesh.vert.wgsl");
-const char[*] MESH_FRAGMENT_WGSL = $embed("../../build/examples/02_mesh/shaders/02_mesh.frag.wgsl");
-const char[*] MESH_VERTEX_GLSL = $embed("../../build/examples/02_mesh/shaders/02_mesh.vert.glsl");
-const char[*] MESH_FRAGMENT_GLSL = $embed("../../build/examples/02_mesh/shaders/02_mesh.frag.glsl");
-
 struct PushConsts
 {
 	float time;
@@ -270,49 +259,6 @@ fn void mesh_depth_deinit()
 	state.depth_image = {};
 }
 
-fn rhi::ShaderGraphicsOptions mesh_shader_stages()
-{
-	char[] vertex_data;
-	char[] fragment_data;
-	String vertex_entry;
-	String fragment_entry;
-	switch (rhi::renderer.backend)
-	{
-		case rhi::Backend.VK:
-			vertex_data = MESH_VERTEX_SPV[..];
-			fragment_data = MESH_FRAGMENT_SPV[..];
-			vertex_entry = "main";
-			fragment_entry = "main";
-	case rhi::Backend.MTL:
-			vertex_data = MESH_VERTEX_MSL[..];
-			fragment_data = MESH_FRAGMENT_MSL[..];
-			vertex_entry = "vertexMain";
-			fragment_entry = "fragmentMain";
-		case rhi::Backend.WGPU:
-			vertex_data = MESH_VERTEX_WGSL[..];
-			fragment_data = MESH_FRAGMENT_WGSL[..];
-			vertex_entry = "vertexMain";
-			fragment_entry = "fragmentMain";
-		case rhi::Backend.WEBGL:
-			vertex_data = MESH_VERTEX_GLSL[..];
-			fragment_data = MESH_FRAGMENT_GLSL[..];
-			vertex_entry = "main";
-			fragment_entry = "main";
-		default:
-			// mesh_renderer_options only selects backends with embedded outputs.
-			vertex_data = MESH_VERTEX_SPV[..];
-			fragment_data = MESH_FRAGMENT_SPV[..];
-			vertex_entry = "main";
-			fragment_entry = "main";
-	}
-	return {
-		.vertex_stage = { .data = vertex_data, .entry_point = vertex_entry },
-		.has_vertex_stage = true,
-		.fragment_stage = { .data = fragment_data, .entry_point = fragment_entry },
-		.has_fragment_stage = true,
-	};
-}
-
 fn void? mesh_pipeline_init(rhi::Format format)
 {
 	rhi::Pipeline? pipeline = rhi::pipeline_init_graphics(&state.device, {
@@ -415,12 +361,12 @@ fn void? mesh_frame()
 	});
 	rhi::cmd_begin_rendering(cmd, &state.device, {
 		.color_attachments = { { .view = view, .load_op = rhi::LoadOp.CLEAR, .store_op = rhi::StoreOp.STORE, .clear_color = { 0, 0, 0, 1 } } },
-		.render_area = { .width = width, .height = height },
+		.render_area = { .width = (float)width, .height = (float)height },
 		.depth_attachment = { .view = state.depth_view, .load_op = rhi::LoadOp.CLEAR, .store_op = rhi::StoreOp.STORE, .clear_depth = 1 },
 		.has_depth_attachment = true,
 	});
 	rhi::cmd_set_viewport(cmd, &state.device, { .width = (float)width, .height = (float)height, .min_depth = 0, .max_depth = 1 });
-	rhi::cmd_set_scissor(cmd, &state.device, { .width = width, .height = height });
+	rhi::cmd_set_scissor(cmd, &state.device, { .width = (float)width, .height = (float)height });
 	rhi::cmd_bind_pipeline(cmd, &state.device, &state.pipeline);
 	// Slot 0 is the RHI slot; Metal maps it to native vertex buffer index 1.
 	rhi::cmd_bind_vertex_buffer(cmd, &state.device, &state.vertex_buffer, 0);
@@ -497,4 +443,57 @@ fn void main(String[] args)
 fn void mesh_web_start(String[] args) @feat(WASM) @export("_start")
 {
 	platform::run(mesh_app(), args);
+}
+
+module mesh_example @feat(RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
+import rhi;
+const char[*] MESH_VERTEX_SPV @align(4) = $embed("../../build/examples/02_mesh/shaders/02_mesh.vert.spv");
+const char[*] MESH_FRAGMENT_SPV @align(4) = $embed("../../build/examples/02_mesh/shaders/02_mesh.frag.spv");
+fn ShaderGraphicsOptions mesh_shader_stages()
+{
+	return {
+		.vertex_stage = { .data = MESH_VERTEX_SPV[..], .entry_point = "main" },
+		.has_vertex_stage = true,
+		.fragment_stage = { .data = MESH_FRAGMENT_SPV[..], .entry_point = "main" },
+		.has_fragment_stage = true,
+	};
+}
+
+module mesh_example @feat(RHI_MTL & DARWIN & !RHI_HEADLESS);
+import rhi;
+const char[*] MESH_VERTEX_MSL = $embed("../../build/examples/02_mesh/shaders/02_mesh.vert.metal");
+const char[*] MESH_FRAGMENT_MSL = $embed("../../build/examples/02_mesh/shaders/02_mesh.frag.metal");
+fn ShaderGraphicsOptions mesh_shader_stages()
+{
+	return {
+		.vertex_stage = { .data = MESH_VERTEX_MSL[..], .entry_point = "vertexMain" },
+		.has_vertex_stage = true,
+		.fragment_stage = { .data = MESH_FRAGMENT_MSL[..], .entry_point = "fragmentMain" },
+		.has_fragment_stage = true,
+	};
+}
+
+module mesh_example @feat(RHI_WGPU & RHI_WEBGL & !RHI_HEADLESS & WASM);
+import rhi;
+const char[*] MESH_VERTEX_WGSL = $embed("../../build/examples/02_mesh/shaders/02_mesh.vert.wgsl");
+const char[*] MESH_FRAGMENT_WGSL = $embed("../../build/examples/02_mesh/shaders/02_mesh.frag.wgsl");
+const char[*] MESH_VERTEX_GLSL = $embed("../../build/examples/02_mesh/shaders/02_mesh.vert.glsl");
+const char[*] MESH_FRAGMENT_GLSL = $embed("../../build/examples/02_mesh/shaders/02_mesh.frag.glsl");
+fn ShaderGraphicsOptions mesh_shader_stages()
+{
+	if (rhi::renderer.backend == rhi::Backend.WGPU)
+	{
+		return {
+			.vertex_stage = { .data = MESH_VERTEX_WGSL[..], .entry_point = "vertexMain" },
+			.has_vertex_stage = true,
+			.fragment_stage = { .data = MESH_FRAGMENT_WGSL[..], .entry_point = "fragmentMain" },
+			.has_fragment_stage = true,
+		};
+	}
+	return {
+		.vertex_stage = { .data = MESH_VERTEX_GLSL[..], .entry_point = "main" },
+		.has_vertex_stage = true,
+		.fragment_stage = { .data = MESH_FRAGMENT_GLSL[..], .entry_point = "main" },
+		.has_fragment_stage = true,
+	};
 }

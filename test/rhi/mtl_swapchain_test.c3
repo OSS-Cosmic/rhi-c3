@@ -7,7 +7,7 @@
 module rhi @feat(RHI_MTL & DARWIN);
 import std::collections::list;
 import std::core::test;
-import sdl3;
+import sdl3_compat;
 
 const uint MTL_SWAPCHAIN_FRAMES_IN_FLIGHT = 3;
 
@@ -64,34 +64,34 @@ fn bool mtl_swapchain_present_frame(Device* device, Swapchain* swapchain,
 
 fn void mtl_swapchain_sdl_present_and_recreate() @test
 {
-	if (!sdl3::init(sdl3::SDL_INIT_VIDEO))
+	if (!sdl3_compat::init(sdl3_compat::SDL_INIT_VIDEO))
 	{
-		log::info("Metal swapchain test skipped: SDL_Init failed: %s", sdl3::get_error());
+		log::info("Metal swapchain test skipped: SDL_Init failed: %s", sdl3_compat::get_error());
 		return;
 	}
-	defer sdl3::quit();
+	defer sdl3_compat::quit();
 
-	sdl3::Window window = sdl3::create_window("rhi Metal swapchain", 64, 64,
-		sdl3::SDL_WINDOW_HIDDEN | sdl3::SDL_WINDOW_METAL);
+	sdl3_compat::Window window = sdl3_compat::create_window("rhi Metal swapchain", 64, 64,
+		sdl3_compat::SDL_WINDOW_HIDDEN | sdl3_compat::SDL_WINDOW_METAL);
 	if (window == null)
 	{
-		log::info("Metal swapchain test skipped: SDL_CreateWindow failed: %s", sdl3::get_error());
+		log::info("Metal swapchain test skipped: SDL_CreateWindow failed: %s", sdl3_compat::get_error());
 		return;
 	}
-	defer sdl3::destroy_window(window);
+	defer sdl3_compat::destroy_window(window);
 
-	sdl3::MetalView view = sdl3::metal_create_view(window);
+	sdl3_compat::MetalView view = sdl3_compat::metal_create_view(window);
 	if (view == null)
 	{
-		log::info("Metal swapchain test skipped: SDL_Metal_CreateView failed: %s", sdl3::get_error());
+		log::info("Metal swapchain test skipped: SDL_Metal_CreateView failed: %s", sdl3_compat::get_error());
 		return;
 	}
-	defer sdl3::metal_destroy_view(view);
+	defer sdl3_compat::metal_destroy_view(view);
 
-	void* layer = sdl3::metal_get_layer(view);
+	void* layer = sdl3_compat::metal_get_layer(view);
 	if (layer == null)
 	{
-		log::info("Metal swapchain test skipped: SDL_Metal_GetLayer failed: %s", sdl3::get_error());
+		log::info("Metal swapchain test skipped: SDL_Metal_GetLayer failed: %s", sdl3_compat::get_error());
 		return;
 	}
 

@@ -48,7 +48,7 @@ fn Timeline? timeline_init(Device* device)
 				return timeline_init_webgl(device);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void timeline_deinit(Timeline* t, Device* device)
@@ -117,7 +117,7 @@ fn ulong? timeline_completed(Timeline* t, Device* device)
 				return timeline_completed_webgl(t, device);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 // Block until the GPU reaches value. Use at shutdown only; prefer polling timeline_completed in the frame loop.
@@ -144,7 +144,7 @@ fn void? timeline_wait(Timeline* t, Device* device, ulong value)
 			// MAX_CLIENT_WAIT_TIMEOUT_WEBGL is 0. Poll timeline_completed instead.
 			return UNSUPPORTED_FEATURE~;
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 // ---- deferral ----
@@ -346,7 +346,7 @@ fn Timeline? timeline_init_vk(Device* device)
 fn void timeline_deinit_vk(Timeline* t, Device* device)
 {
 	device.backend.vk.vtable.destroySemaphore(device.backend.vk.device, t.backend.vk.semaphore, null);
-	t.backend.vk.semaphore = 0;
+	t.backend.vk.semaphore = (vk::Semaphore)0;
 }
 
 fn ulong? timeline_completed_vk(Timeline* t, Device* device)

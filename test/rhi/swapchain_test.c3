@@ -73,19 +73,3 @@ fn void swapchain_wgpu_surface_format_maps() @test
 // test_swapchain_image_desc_is_valid_color_target is not ported here: it
 // needs `gl_image_validate` / `wgpu_image_create_params` from the web
 // backends, so the web port adds it.
-
-fn void swapchain_unsupported_backend_natively() @test
-{
-	// No web backend is compiled natively, so every web arm falls through.
-	Backend saved = renderer.backend;
-	defer renderer.backend = saved;
-	renderer.backend = WEBGL;
-	Queue queue;
-	SwapchainDesc desc = {
-		.width = 1,
-		.height = 1,
-		.queue = &queue,
-		.source = { .kind = WINDOW, .window = { .kind = CANVAS } },
-	};
-	test::@check(@catch(swapchain_init(null, desc)) == UNSUPPORTED_BACKEND);
-}

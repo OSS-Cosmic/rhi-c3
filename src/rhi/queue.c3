@@ -45,7 +45,7 @@ fn void? queue_wait_idle(Queue* q, Device* device)
 				return queue_wait_idle_webgl(q, device);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 struct TimelineOp
@@ -95,7 +95,7 @@ fn void? queue_submit(Queue* q, Device* device, QueueSubmitDesc desc)
 				return queue_submit_webgl(q, device, desc);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 // ---- metal ----
@@ -366,7 +366,7 @@ fn vk::PipelineStageFlags2 vk_submit_stage_mask(BarrierStages stages)
 
 // `fallback_fence` is internal (swapchain frame submit): signalled by this
 // submit when `desc.completion` carries no fence. The caller resets it.
-fn void? queue_submit_vk(Queue* q, Device* device, QueueSubmitDesc desc, vk::Fence fallback_fence = 0) => @pool()
+fn void? queue_submit_vk(Queue* q, Device* device, QueueSubmitDesc desc, vk::Fence fallback_fence = (vk::Fence)0) => @pool()
 {
 	vk::DeviceVTable* vtable = &device.backend.vk.vtable;
 
@@ -428,7 +428,7 @@ fn void? queue_submit_vk(Queue* q, Device* device, QueueSubmitDesc desc, vk::Fen
 	// Ring fences are created signaled, so the completion fence is reset here
 	// and re-signaled by this submit; command_ring_element_wait_vk waits on it.
 	vk::Fence fence = fallback_fence;
-	if (desc.completion && desc.completion.backend.vk.fence != 0)
+	if (desc.completion && desc.completion.backend.vk.fence != (vk::Fence)0)
 	{
 		fence = desc.completion.backend.vk.fence;
 		vk_check(vtable.resetFences(device.backend.vk.device, 1, &fence))!;

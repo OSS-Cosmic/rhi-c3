@@ -4,6 +4,7 @@
 // Backend-neutral image view handle. Port of the Vulkan arm of rhi-zig's
 // `image_view.zig` `ImageView` type.
 module rhi;
+import d3d12, dxgi, mtl, vk;
 
 enum ViewType : char
 {
@@ -59,32 +60,240 @@ struct ImageView
 	}
 }
 
+<*
+	@require [image] image != null && image.cookie != 0 :
+	`Image views require an initialized image.`
+*>
 fn ImageView? image_view_init(Device* device, Image* image, ViewDesc desc)
 {
 	switch (renderer.backend)
 	{
 		case VK:
 			$if HAS_VK:
-				return image_view_init_vk(device, image, desc);
+				{
+	assert(image.backend.vk.image != (vk::Image)0, "image view requires a valid Vulkan image");
+					vk::ImageViewCreateInfo create_info = {
+						.sType = vk::StructureType.IMAGE_VIEW_CREATE_INFO,
+						.image = image.backend.vk.image,
+						.viewType = image_view_type_vk(desc.view_type),
+						.format = to_vk_format(desc.format),
+						.components = {
+							.r = vk::ComponentSwizzle.IDENTITY,
+							.g = vk::ComponentSwizzle.IDENTITY,
+							.b = vk::ComponentSwizzle.IDENTITY,
+							.a = vk::ComponentSwizzle.IDENTITY,
+						},
+						.subresourceRange = {
+							.aspectMask = image_view_aspect_vk(desc.aspect),
+							.baseMipLevel = desc.base_mip,
+							.levelCount = desc.mip_num,
+							.baseArrayLayer = desc.base_layer,
+							.layerCount = desc.layer_num,
+						},
+					};
+					vk::ImageView view;
+					vk_check(device.backend.vk.vtable.createImageView(device.backend.vk.device, &create_info, null, &view))!;
+					return {
+						.cookie = next_cookie(),
+						.backend.vk = { .view = view, .borrowed = false },
+					};
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				return image_view_init_dx12(device, image, desc);
+				{
+					assert(image != null && image.cookie != 0 && image.backend.dx12.resource &&
+						desc.mip_num != 0 && desc.layer_num != 0,
+						"DX12 image view requires an initialized image and a nonempty range");
+					ImageDx12* parent = &image.backend.dx12;
+					assert(desc.base_mip < parent.mip_levels && desc.mip_num <= parent.mip_levels - desc.base_mip &&
+						desc.base_layer < parent.array_layers && desc.layer_num <= parent.array_layers - desc.base_layer,
+						"DX12 image view range exceeds its image");
+					assert(desc.view_type != ViewType.SHADING_RATE_ATTACHMENT,
+						"DX12 does not support shading rate image views");
+
+					d3d12::DescriptorHeapType heap_type;
+					if (dx12_view_is_srv(desc.view_type) || dx12_view_is_uav(desc.view_type))
+					{
+						heap_type = d3d12::DescriptorHeapType.CBV_SRV_UAV;
+					}
+					else if (desc.view_type == ViewType.COLOR_ATTACHMENT)
+					{
+						heap_type = d3d12::DescriptorHeapType.RTV;
+					}
+					else
+					{
+						heap_type = d3d12::DescriptorHeapType.DSV;
+					}
+
+					d3d12::Device* dev = device.backend.dx12.device;
+					d3d12::DescriptorHeapDesc heap_desc = {
+						.type = heap_type,
+						.num_descriptors = 1,
+						.flags = d3d12::DESCRIPTOR_HEAP_FLAG_NONE,
+					};
+					Guid iid = d3d12::IID_DESCRIPTOR_HEAP;
+					d3d12::DescriptorHeap* heap;
+					if (dxgi::failed(dev.vtbl.create_descriptor_heap(dev, &heap_desc, &iid, (void**)&heap)) || !heap)
+					{
+						return OUT_OF_DEVICE_MEMORY~;
+					}
+					d3d12::CpuDescriptorHandle cpu;
+					heap.vtbl.get_cpu_descriptor_handle_for_heap_start(heap, &cpu);
+
+					d3d12::Resource* resource = parent.resource;
+					dxgi::Format format;
+					if (dx12_view_is_srv(desc.view_type))
+					{
+						d3d12::ShaderResourceViewDesc srv;
+						if (catch err = dx12_fill_srv(&srv, parent, desc))
+						{
+							dxgi::release(heap);
+							return err~;
+						}
+						format = srv.format;
+						dev.vtbl.create_shader_resource_view(dev, resource, &srv, cpu);
+					}
+					else if (dx12_view_is_uav(desc.view_type))
+					{
+						d3d12::UnorderedAccessViewDesc uav;
+						if (catch err = dx12_fill_uav(&uav, desc))
+						{
+							dxgi::release(heap);
+							return err~;
+						}
+						format = uav.format;
+						dev.vtbl.create_unordered_access_view(dev, resource, null, &uav, cpu);
+					}
+					else if (desc.view_type == ViewType.COLOR_ATTACHMENT)
+					{
+						d3d12::RenderTargetViewDesc rtv;
+						if (catch err = dx12_fill_rtv(&rtv, parent, desc))
+						{
+							dxgi::release(heap);
+							return err~;
+						}
+						format = rtv.format;
+						dev.vtbl.create_render_target_view(dev, resource, &rtv, cpu);
+					}
+					else
+					{
+						d3d12::DepthStencilViewDesc dsv;
+						if (catch err = dx12_fill_dsv(&dsv, parent, desc))
+						{
+							dxgi::release(heap);
+							return err~;
+						}
+						format = dsv.format;
+						dev.vtbl.create_depth_stencil_view(dev, resource, &dsv, cpu);
+					}
+
+					return {
+						.cookie = next_cookie(),
+						.backend.dx12 = {
+							.heap = heap,
+							.heap_type = heap_type,
+							.cpu = cpu,
+							.resource = resource,
+							.format = format,
+						},
+					};
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				return image_view_init_mtl_impl(device, image, desc);
+				{
+					assert(image != null && image.cookie != 0 && image.backend.mtl.texture &&
+						desc.mip_num != 0 && desc.layer_num != 0,
+						"Metal image view requires an initialized image and a nonempty range");
+					ImageMtlState* parent_state = &image.backend.mtl;
+					assert(desc.base_mip < parent_state.mip_levels && desc.mip_num <= parent_state.mip_levels - desc.base_mip &&
+						desc.base_layer < parent_state.array_layers && desc.layer_num <= parent_state.array_layers - desc.base_layer,
+						"Metal image view range exceeds its image");
+					assert(parent_state.image_type != D3 || (desc.base_layer == 0 && desc.layer_num == 1),
+						"Metal 3D image views must cover the single array layer");
+					assert(to_mtl_pixel_format(desc.format) != mtl::PixelFormat.INVALID,
+						"Metal image view format is unsupported");
+
+					mtl::Texture parent = parent_state.texture;
+					parent.retain();
+					if (mtl_view_full_range(parent_state, desc))
+					{
+						return {
+							.cookie = next_cookie(),
+							.backend.mtl = { .texture = parent, .parent = parent, .aliases_parent = true },
+						};
+					}
+
+					mtl::NSRange levels = { .location = desc.base_mip, .length = desc.mip_num };
+					mtl::NSRange slices = { .location = desc.base_layer, .length = desc.layer_num };
+					mtl::Texture view = parent.new_texture_view(
+						to_mtl_pixel_format(desc.format), mtl_view_texture_type(desc.view_type), levels, slices);
+					if (!view)
+					{
+						parent.release();
+						return OUT_OF_DEVICE_MEMORY~;
+					}
+					return {
+						.cookie = next_cookie(),
+						.backend.mtl = { .texture = view, .parent = parent, .aliases_parent = false },
+					};
+				}
 			$endif
 		case WGPU:
 			$if HAS_WGPU:
-				return image_view_init_wgpu(device, image, desc);
+				{
+					if (image == null || image.cookie == 0) return INITIALIZATION_FAILED~;
+					ImageWgpu* state = &image.backend.wgpu;
+					if (desc.base_mip >= state.mip_levels || desc.mip_num == 0 || desc.mip_num > state.mip_levels - desc.base_mip || desc.base_layer >= state.array_layers || desc.layer_num == 0 || desc.layer_num > state.array_layers - desc.base_layer) return UNSUPPORTED_FEATURE~;
+					uint dimension;
+					switch (desc.view_type)
+					{
+						case SHADER_RESOURCE_1D: dimension = 0;
+						case SHADER_RESOURCE_STORAGE_1D: dimension = 0;
+						case SHADER_RESOURCE_2D: dimension = 1;
+						case SHADER_RESOURCE_STORAGE_2D: dimension = 1;
+						case COLOR_ATTACHMENT: dimension = 1;
+						case DEPTH_STENCIL_ATTACHMENT: dimension = 1;
+						case DEPTH_READONLY_STENCIL_ATTACHMENT: dimension = 1;
+						case DEPTH_ATTACHMENT_STENCIL_READONLY: dimension = 1;
+						case DEPTH_STENCIL_READONLY: dimension = 1;
+						case SHADER_RESOURCE_2D_ARRAY: dimension = 2;
+						case SHADER_RESOURCE_STORAGE_2D_ARRAY: dimension = 2;
+						case SHADER_RESOURCE_CUBE: dimension = 3;
+						case SHADER_RESOURCE_CUBE_ARRAY: dimension = 4;
+						case SHADER_RESOURCE_3D: dimension = 5;
+						case SHADER_RESOURCE_STORAGE_3D: dimension = 5;
+						default: return UNSUPPORTED_FEATURE~;
+					}
+					uint aspect = desc.aspect == COLOR || desc.aspect == DEPTH_STENCIL ? 0 : desc.aspect == STENCIL ? 1 : 2;
+					WgpuTextureFormat format = wgpu_format(desc.format)!!;
+					uint view = wgpu_texture_create_view(state.texture, (uint)format, dimension, aspect, desc.base_mip, desc.mip_num, desc.base_layer, desc.layer_num);
+					if (view == 0) return OUT_OF_DEVICE_MEMORY~;
+					return { .cookie = next_cookie(), .backend.wgpu = { .view = view } };
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				return image_view_init_webgl(device, image, desc);
+				{
+					if (image == null || image.backend.webgl.texture == 0) return INITIALIZATION_FAILED~;
+					ImageView v = {};
+					v.backend.webgl.texture = image.backend.webgl.texture;
+					v.backend.webgl.width = image.backend.webgl.width;
+					v.backend.webgl.height = image.backend.webgl.height;
+					if (desc.view_type == COLOR_ATTACHMENT || desc.view_type == DEPTH_STENCIL_ATTACHMENT)
+					{
+						v.backend.webgl.framebuffer = gl_create_framebuffer();
+						uint attachment = desc.view_type == COLOR_ATTACHMENT ? GL_COLOR_ATTACHMENT0 : GL_DEPTH_STENCIL_ATTACHMENT;
+						gl_framebuffer_texture_2d(v.backend.webgl.framebuffer, attachment, v.backend.webgl.texture);
+						if (gl_check_framebuffer_status(v.backend.webgl.framebuffer) != 0x8CD5) return INITIALIZATION_FAILED~;
+					}
+					v.cookie = image.cookie ^ ((ulong)desc.base_mip << 32) ^ desc.base_layer + 1;
+					return v;
+				}
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void image_view_deinit(ImageView* v, Device* device)
@@ -168,53 +377,6 @@ fn bool mtl_view_full_range(ImageMtlState* image, ViewDesc desc)
 	return desc.base_mip == 0 && desc.mip_num == image.mip_levels &&
 		desc.base_layer == 0 && desc.layer_num == image.array_layers &&
 		desc.format == image.format && mtl_view_texture_type(desc.view_type) == image.texture_type;
-}
-
-fn ImageView? image_view_init_mtl_impl(Device* device, Image* image, ViewDesc desc)
-{
-	if (image == null || image.cookie == 0 || !image.backend.mtl.texture ||
-		desc.mip_num == 0 || desc.layer_num == 0)
-	{
-		return UNSUPPORTED_FEATURE~;
-	}
-	ImageMtlState* parent_state = &image.backend.mtl;
-	if (desc.base_mip >= parent_state.mip_levels || desc.mip_num > parent_state.mip_levels - desc.base_mip ||
-		desc.base_layer >= parent_state.array_layers || desc.layer_num > parent_state.array_layers - desc.base_layer)
-	{
-		return UNSUPPORTED_FEATURE~;
-	}
-	if (parent_state.image_type == D3 && (desc.base_layer != 0 || desc.layer_num != 1))
-	{
-		return UNSUPPORTED_FEATURE~;
-	}
-	if (to_mtl_pixel_format(desc.format) == mtl::PixelFormat.INVALID)
-	{
-		return UNSUPPORTED_FEATURE~;
-	}
-
-	mtl::Texture parent = parent_state.texture;
-	parent.retain();
-	if (mtl_view_full_range(parent_state, desc))
-	{
-		return {
-			.cookie = next_cookie(),
-			.backend.mtl = { .texture = parent, .parent = parent, .aliases_parent = true },
-		};
-	}
-
-	mtl::NSRange levels = { .location = desc.base_mip, .length = desc.mip_num };
-	mtl::NSRange slices = { .location = desc.base_layer, .length = desc.layer_num };
-	mtl::Texture view = parent.new_texture_view(
-		to_mtl_pixel_format(desc.format), mtl_view_texture_type(desc.view_type), levels, slices);
-	if (!view)
-	{
-		parent.release();
-		return OUT_OF_DEVICE_MEMORY~;
-	}
-	return {
-		.cookie = next_cookie(),
-		.backend.mtl = { .texture = view, .parent = parent, .aliases_parent = false },
-	};
 }
 
 fn void image_view_deinit_mtl_impl(ImageView* view, Device* device)
@@ -438,109 +600,6 @@ fn void? dx12_fill_dsv(d3d12::DepthStencilViewDesc* out, ImageDx12* image, ViewD
 	}
 }
 
-fn ImageView? image_view_init_dx12(Device* device, Image* image, ViewDesc desc)
-{
-	if (image == null || image.cookie == 0 || !image.backend.dx12.resource ||
-		desc.mip_num == 0 || desc.layer_num == 0)
-	{
-		return UNSUPPORTED_FEATURE~;
-	}
-	ImageDx12* parent = &image.backend.dx12;
-	if (desc.base_mip >= parent.mip_levels || desc.mip_num > parent.mip_levels - desc.base_mip ||
-		desc.base_layer >= parent.array_layers || desc.layer_num > parent.array_layers - desc.base_layer)
-	{
-		return UNSUPPORTED_FEATURE~;
-	}
-	if (desc.view_type == ViewType.SHADING_RATE_ATTACHMENT) return UNSUPPORTED_FEATURE~;
-
-	d3d12::DescriptorHeapType heap_type;
-	if (dx12_view_is_srv(desc.view_type) || dx12_view_is_uav(desc.view_type))
-	{
-		heap_type = d3d12::DescriptorHeapType.CBV_SRV_UAV;
-	}
-	else if (desc.view_type == ViewType.COLOR_ATTACHMENT)
-	{
-		heap_type = d3d12::DescriptorHeapType.RTV;
-	}
-	else
-	{
-		heap_type = d3d12::DescriptorHeapType.DSV;
-	}
-
-	d3d12::Device* dev = device.backend.dx12.device;
-	d3d12::DescriptorHeapDesc heap_desc = {
-		.type = heap_type,
-		.num_descriptors = 1,
-		.flags = d3d12::DESCRIPTOR_HEAP_FLAG_NONE,
-	};
-	Guid iid = d3d12::IID_DESCRIPTOR_HEAP;
-	d3d12::DescriptorHeap* heap;
-	if (dxgi::failed(dev.vtbl.create_descriptor_heap(dev, &heap_desc, &iid, (void**)&heap)) || !heap)
-	{
-		return OUT_OF_DEVICE_MEMORY~;
-	}
-	d3d12::CpuDescriptorHandle cpu;
-	heap.vtbl.get_cpu_descriptor_handle_for_heap_start(heap, &cpu);
-
-	d3d12::Resource* resource = parent.resource;
-	dxgi::Format format;
-	if (dx12_view_is_srv(desc.view_type))
-	{
-		d3d12::ShaderResourceViewDesc srv;
-		if (catch err = dx12_fill_srv(&srv, parent, desc))
-		{
-			dxgi::release(heap);
-			return err~;
-		}
-		format = srv.format;
-		dev.vtbl.create_shader_resource_view(dev, resource, &srv, cpu);
-	}
-	else if (dx12_view_is_uav(desc.view_type))
-	{
-		d3d12::UnorderedAccessViewDesc uav;
-		if (catch err = dx12_fill_uav(&uav, desc))
-		{
-			dxgi::release(heap);
-			return err~;
-		}
-		format = uav.format;
-		dev.vtbl.create_unordered_access_view(dev, resource, null, &uav, cpu);
-	}
-	else if (desc.view_type == ViewType.COLOR_ATTACHMENT)
-	{
-		d3d12::RenderTargetViewDesc rtv;
-		if (catch err = dx12_fill_rtv(&rtv, parent, desc))
-		{
-			dxgi::release(heap);
-			return err~;
-		}
-		format = rtv.format;
-		dev.vtbl.create_render_target_view(dev, resource, &rtv, cpu);
-	}
-	else
-	{
-		d3d12::DepthStencilViewDesc dsv;
-		if (catch err = dx12_fill_dsv(&dsv, parent, desc))
-		{
-			dxgi::release(heap);
-			return err~;
-		}
-		format = dsv.format;
-		dev.vtbl.create_depth_stencil_view(dev, resource, &dsv, cpu);
-	}
-
-	return {
-		.cookie = next_cookie(),
-		.backend.dx12 = {
-			.heap = heap,
-			.heap_type = heap_type,
-			.cpu = cpu,
-			.resource = resource,
-			.format = format,
-		},
-	};
-}
-
 fn void image_view_deinit_dx12(ImageView* v, Device* device)
 {
 	if (v.backend.dx12.heap) dxgi::release(v.backend.dx12.heap);
@@ -575,9 +634,9 @@ fn vk::ImageViewType image_view_type_vk(ViewType type) @private
 	switch (type)
 	{
 		case SHADER_RESOURCE_1D:
-		case SHADER_RESOURCE_STORAGE_1D: return vk::ImageViewType.D1;
+		case SHADER_RESOURCE_STORAGE_1D: return vk::ImageViewType.TYPE_1D;
 		case SHADER_RESOURCE_1D_ARRAY:
-		case SHADER_RESOURCE_STORAGE_1D_ARRAY: return vk::ImageViewType.D1_ARRAY;
+		case SHADER_RESOURCE_STORAGE_1D_ARRAY: return vk::ImageViewType.TYPE_1D_ARRAY;
 		case SHADER_RESOURCE_2D:
 		case SHADER_RESOURCE_STORAGE_2D:
 		case COLOR_ATTACHMENT:
@@ -585,50 +644,20 @@ fn vk::ImageViewType image_view_type_vk(ViewType type) @private
 		case DEPTH_READONLY_STENCIL_ATTACHMENT:
 		case DEPTH_ATTACHMENT_STENCIL_READONLY:
 		case DEPTH_STENCIL_READONLY:
-		case SHADING_RATE_ATTACHMENT: return vk::ImageViewType.D2;
+		case SHADING_RATE_ATTACHMENT: return vk::ImageViewType.TYPE_2D;
 		case SHADER_RESOURCE_2D_ARRAY:
-		case SHADER_RESOURCE_STORAGE_2D_ARRAY: return vk::ImageViewType.D2_ARRAY;
+		case SHADER_RESOURCE_STORAGE_2D_ARRAY: return vk::ImageViewType.TYPE_2D_ARRAY;
 		case SHADER_RESOURCE_CUBE: return vk::ImageViewType.CUBE;
 		case SHADER_RESOURCE_CUBE_ARRAY: return vk::ImageViewType.CUBE_ARRAY;
 		case SHADER_RESOURCE_3D:
-		case SHADER_RESOURCE_STORAGE_3D: return vk::ImageViewType.D3;
+		case SHADER_RESOURCE_STORAGE_3D: return vk::ImageViewType.TYPE_3D;
 	}
-}
-
-fn ImageView? image_view_init_vk(Device* device, Image* image, ViewDesc desc)
-{
-	if (image == null || image.cookie == 0 || image.backend.vk.image == vk::NULL_HANDLE) return UNSUPPORTED_FEATURE~;
-	vk::ImageViewCreateInfo create_info = {
-		.sType = vk::StructureType.IMAGE_VIEW_CREATE_INFO,
-		.image = image.backend.vk.image,
-		.viewType = image_view_type_vk(desc.view_type),
-		.format = to_vk_format(desc.format),
-		.components = {
-			.r = vk::ComponentSwizzle.IDENTITY,
-			.g = vk::ComponentSwizzle.IDENTITY,
-			.b = vk::ComponentSwizzle.IDENTITY,
-			.a = vk::ComponentSwizzle.IDENTITY,
-		},
-		.subresourceRange = {
-			.aspectMask = image_view_aspect_vk(desc.aspect),
-			.baseMipLevel = desc.base_mip,
-			.levelCount = desc.mip_num,
-			.baseArrayLayer = desc.base_layer,
-			.layerCount = desc.layer_num,
-		},
-	};
-	vk::ImageView view;
-	vk_check(device.backend.vk.vtable.createImageView(device.backend.vk.device, &create_info, null, &view))!;
-	return {
-		.cookie = next_cookie(),
-		.backend.vk = { .view = view, .borrowed = false },
-	};
 }
 
 fn void image_view_deinit_vk(ImageView* v, Device* device)
 {
 	if (v.backend.vk.borrowed) return;
-	if (v.backend.vk.view != vk::NULL_HANDLE) {
+	if (v.backend.vk.view != (vk::ImageView)0) {
 		device.backend.vk.vtable.destroyImageView(device.backend.vk.device, v.backend.vk.view, null);
 	}
 	v.backend.vk = {};

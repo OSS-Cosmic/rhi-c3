@@ -257,10 +257,6 @@ fn void? queue_submit_wgpu(Queue* q, Device* device, QueueSubmitDesc desc)
 
 // ---- pool / command ring --------------------------------------------------
 
-fn Pool? pool_init_wgpu(Device* device, Queue* queue) { return { .backend.wgpu = {} }; }
-fn void? pool_reset_wgpu(Pool* p, Device* device) { return; }
-fn void pool_deinit_wgpu(Pool* p, Device* device) {}
-
 fn void? command_ring_element_wait_wgpu(CommandRingElement* e, Device* device) { return; }
 
 fn CommandRingBuffer{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE}? command_ring_buffer_init_wgpu(Device* device, Queue* queue) <POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE>
@@ -268,8 +264,8 @@ fn CommandRingBuffer{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE}? command_ring_buf
 	CommandRingBuffer{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE} result = { .pool_index = (sz)POOL_COUNT };
 	for (sz p = 0; p < (sz)POOL_COUNT; p++)
 	{
-		result.pools[p] = pool_init_wgpu(device, queue)!;
-		for (sz c = 0; c < (sz)CMD_PER_POOL; c++) result.cmds[p][c] = cmd_init_wgpu(device, &result.pools[p])!;
+		result.pools[p] = pool_init(device, queue)!;
+		for (sz c = 0; c < (sz)CMD_PER_POOL; c++) result.cmds[p][c] = cmd_init(device, &result.pools[p])!;
 	}
 	return result;
 }
@@ -279,7 +275,7 @@ fn void command_ring_buffer_deinit_wgpu(CommandRingBuffer{POOL_COUNT, CMD_PER_PO
 	for (sz p = 0; p < (sz)POOL_COUNT; p++)
 	{
 		for (sz c = 0; c < (sz)CMD_PER_POOL; c++) cmd_deinit(&r.cmds[p][c], device, &r.pools[p]);
-		pool_deinit_wgpu(&r.pools[p], device);
+		pool_deinit(&r.pools[p], device);
 	}
 	*r = {};
 }
@@ -316,29 +312,6 @@ fn uint wgpu_buffer_usage(BufferUsage u, bool mapped)
 	if (u.shader_resource_storage) usage |= WGPU_BUFFER_STORAGE;
 	if (u.indirect) usage |= WGPU_BUFFER_INDIRECT;
 	return usage;
-}
-
-fn Buffer? buffer_init_general_wgpu(Device* device, BufferDesc desc)
-{
-	uint size = web_buffer_size(desc.size, device.adapter.buffer_max_size)!!;
-	uint usage = wgpu_buffer_usage(desc.usage, desc.persistent_map);
-	if (usage == 0) usage = WGPU_BUFFER_COPY_DST;
-	uint buffer = wgpu_device_create_buffer(device.backend.wgpu.device, size, usage);
-	if (buffer == 0) return OUT_OF_DEVICE_MEMORY~;
-	char[] mapped;
-	if (desc.persistent_map)
-	{
-		mapped = alloc::malloc(device.allocator, desc.size)[:desc.size];
-		if (mapped.ptr == null) { wgpu_release(buffer); return OUT_OF_DEVICE_MEMORY~; }
-	}
-	return { .cookie = next_cookie(), .mapped_region = mapped, .backend.wgpu = { .buffer = buffer, .size = (ulong)desc.size, .usage = usage } };
-}
-
-fn void buffer_deinit_wgpu(Buffer* b, Device* device)
-{
-	wgpu_release_if(&b.backend.wgpu.buffer);
-	if (b.mapped_region.ptr != null) alloc::free(device.allocator, b.mapped_region.ptr);
-	b.backend.wgpu = {};
 }
 
 fn void buffer_write_wgpu(Buffer* b, Device* device, sz offset, char[] bytes)
@@ -418,19 +391,6 @@ fn uint wgpu_image_usage(ImageUsage usage)
 	return result;
 }
 
-fn Image? image_init_wgpu(Device* device, ImageDesc desc)
-{
-	if (desc.width == 0 || desc.height == 0 || desc.depth == 0 || desc.mip_levels == 0 || desc.array_layers == 0) return UNSUPPORTED_FEATURE~;
-	WgpuTextureFormat format = wgpu_format(desc.format)!!;
-	uint dimension = desc.image_type == D1 ? 0 : desc.image_type == D2 ? 1 : 2;
-	uint depth_or_layers = desc.image_type == D3 ? desc.depth : desc.array_layers;
-	if (desc.image_type == D1 && (desc.height != 1 || desc.depth != 1)) return UNSUPPORTED_FEATURE~;
-	if (desc.image_type == D3 && desc.array_layers != 1) return UNSUPPORTED_FEATURE~;
-	uint texture = wgpu_device_create_texture(device.backend.wgpu.device, (uint)format, desc.width, desc.height, depth_or_layers, desc.mip_levels, wgpu_sample_count(desc.samples), dimension, wgpu_image_usage(desc.usage));
-	if (texture == 0) return OUT_OF_DEVICE_MEMORY~;
-	return { .cookie = next_cookie(), .backend.wgpu = { .texture = texture, .format = desc.format, .image_type = desc.image_type, .width = desc.width, .height = desc.height, .depth = desc.depth, .mip_levels = desc.mip_levels, .array_layers = desc.array_layers } };
-}
-
 fn void image_deinit_wgpu(Image* image, Device* device) { wgpu_release_if(&image.backend.wgpu.texture); image.backend.wgpu = {}; }
 
 fn void? image_upload_wgpu(Image* image, Device* device, ImageUploadOptions options)
@@ -459,38 +419,6 @@ fn void? image_upload_wgpu(Image* image, Device* device, ImageUploadOptions opti
 	uint rows = options.rows_per_image == 0 ? options.extent.height : options.rows_per_image;
 	wgpu_queue_write_texture(device.backend.wgpu.queue, state.texture, options.mip_level, options.origin.x, options.origin.y, z, options.extent.width, options.extent.height, depth, options.data.ptr, (uint)options.data.len, row, rows);
 	return;
-}
-
-fn ImageView? image_view_init_wgpu(Device* device, Image* image, ViewDesc desc)
-{
-	if (image == null || image.cookie == 0) return INITIALIZATION_FAILED~;
-	ImageWgpu* state = &image.backend.wgpu;
-	if (desc.base_mip >= state.mip_levels || desc.mip_num == 0 || desc.mip_num > state.mip_levels - desc.base_mip || desc.base_layer >= state.array_layers || desc.layer_num == 0 || desc.layer_num > state.array_layers - desc.base_layer) return UNSUPPORTED_FEATURE~;
-	uint dimension;
-	switch (desc.view_type)
-	{
-		case SHADER_RESOURCE_1D: dimension = 0;
-		case SHADER_RESOURCE_STORAGE_1D: dimension = 0;
-		case SHADER_RESOURCE_2D: dimension = 1;
-		case SHADER_RESOURCE_STORAGE_2D: dimension = 1;
-		case COLOR_ATTACHMENT: dimension = 1;
-		case DEPTH_STENCIL_ATTACHMENT: dimension = 1;
-		case DEPTH_READONLY_STENCIL_ATTACHMENT: dimension = 1;
-		case DEPTH_ATTACHMENT_STENCIL_READONLY: dimension = 1;
-		case DEPTH_STENCIL_READONLY: dimension = 1;
-		case SHADER_RESOURCE_2D_ARRAY: dimension = 2;
-		case SHADER_RESOURCE_STORAGE_2D_ARRAY: dimension = 2;
-		case SHADER_RESOURCE_CUBE: dimension = 3;
-		case SHADER_RESOURCE_CUBE_ARRAY: dimension = 4;
-		case SHADER_RESOURCE_3D: dimension = 5;
-		case SHADER_RESOURCE_STORAGE_3D: dimension = 5;
-		default: return UNSUPPORTED_FEATURE~;
-	}
-	uint aspect = desc.aspect == COLOR || desc.aspect == DEPTH_STENCIL ? 0 : desc.aspect == STENCIL ? 1 : 2;
-	WgpuTextureFormat format = wgpu_format(desc.format)!!;
-	uint view = wgpu_texture_create_view(state.texture, (uint)format, dimension, aspect, desc.base_mip, desc.mip_num, desc.base_layer, desc.layer_num);
-	if (view == 0) return OUT_OF_DEVICE_MEMORY~;
-	return { .cookie = next_cookie(), .backend.wgpu = { .view = view } };
 }
 
 fn void image_view_deinit_wgpu(ImageView* v, Device* device) { wgpu_release_if(&v.backend.wgpu.view); v.backend.wgpu = {}; }
@@ -574,167 +502,18 @@ fn void pipeline_deinit_wgpu(Pipeline* p, Device* device)
 
 // ---- command encoding -----------------------------------------------------
 
-fn Cmd? cmd_init_wgpu(Device* device, Pool* pool)
-{
-	if (device == null || device.backend.wgpu.device == 0) return INITIALIZATION_FAILED~;
-	return { .backend.wgpu = { .device = device.backend.wgpu.device } };
-}
 
-fn void cmd_deinit_wgpu(Cmd* c, Device* device, Pool* pool)
-{
-	CmdWgpu* s = &c.backend.wgpu;
-	if (s.pass != 0) { wgpu_render_pass_end(s.pass); s.pass = 0; }
-	wgpu_release_if(&s.command_buffer);
-	wgpu_release_if(&s.encoder);
-	wgpu_release_if(&s.texture_bind_group);
-	s.pipeline = 0;
-	s.push_constant_group = 0;
-}
 
-fn void? cmd_begin_wgpu(Cmd* c, Device* device)
-{
-	CmdWgpu* s = &c.backend.wgpu;
-	if (s.encoder != 0) return UNKNOWN~;
-	s.encoder = wgpu_device_create_command_encoder(s.device);
-	if (s.encoder == 0) return OUT_OF_DEVICE_MEMORY~;
-	return;
-}
 
-fn void? cmd_end_wgpu(Cmd* c, Device* device)
-{
-	CmdWgpu* s = &c.backend.wgpu;
-	if (s.pass != 0) { wgpu_render_pass_end(s.pass); s.pass = 0; }
-	if (s.encoder == 0) return UNKNOWN~;
-	wgpu_release_if(&s.command_buffer);
-	s.command_buffer = wgpu_command_encoder_finish(s.encoder);
-	wgpu_release_if(&s.encoder);
-	if (s.command_buffer == 0) return UNKNOWN~;
-	return;
-}
 
-fn void cmd_set_viewport_wgpu(Cmd* c, Device* device, Viewport vp)
-{
-	if (c.backend.wgpu.pass != 0) wgpu_render_pass_set_viewport(c.backend.wgpu.pass, vp.x, vp.y, vp.width, vp.height, vp.min_depth, vp.max_depth);
-}
-fn void cmd_set_scissor_wgpu(Cmd* c, Device* device, Rect rect)
-{
-	if (c.backend.wgpu.pass != 0 && rect.x >= 0 && rect.y >= 0) wgpu_render_pass_set_scissor_rect(c.backend.wgpu.pass, (uint)rect.x, (uint)rect.y, rect.width, rect.height);
-}
-fn void cmd_draw_wgpu(Cmd* c, Device* device, uint vertex_count, uint instance_count, uint first_vertex, uint first_instance)
-{
-	if (c.backend.wgpu.pass != 0) wgpu_render_pass_draw(c.backend.wgpu.pass, vertex_count, instance_count, first_vertex, first_instance);
-}
-fn void cmd_draw_indexed_wgpu(Cmd* c, Device* device, uint index_count, uint instance_count, uint first_index, int vertex_offset, uint first_instance)
-{
-	if (c.backend.wgpu.pass != 0) wgpu_render_pass_draw_indexed(c.backend.wgpu.pass, index_count, instance_count, first_index, vertex_offset, first_instance);
-}
-fn void cmd_draw_indirect_wgpu(Cmd* c, Device* device, Buffer* buffer, ulong offset, uint draw_count, uint stride) { wgpu_log_text("WebGPU: indirect draws are not in the scalar bridge"); }
-fn void cmd_draw_indexed_indirect_wgpu(Cmd* c, Device* device, Buffer* buffer, ulong offset, uint draw_count, uint stride) { wgpu_log_text("WebGPU: indexed indirect draws are not in the scalar bridge"); }
-fn void cmd_draw_indirect_count_wgpu(Cmd* c, Device* device, Buffer* buffer, ulong offset, Buffer* count_buffer, ulong count_offset, uint max_draw_count, uint stride) { wgpu_log_text("WebGPU: indirect-count draws are not in the scalar bridge"); }
 
-fn void cmd_bind_pipeline_wgpu(Cmd* c, Device* device, Pipeline* pipeline)
-{
-	c.backend.wgpu.pipeline = pipeline == null ? 0 : pipeline.backend.wgpu.pipeline;
-	c.backend.wgpu.push_constant_group = pipeline == null ? 0 : pipeline.backend.wgpu.push_constant_group;
-	if (c.backend.wgpu.pass != 0 && c.backend.wgpu.pipeline != 0)
-	{
-		wgpu_render_pass_set_pipeline(c.backend.wgpu.pass, c.backend.wgpu.pipeline);
-		if (c.backend.wgpu.push_constant_group != 0) wgpu_render_pass_set_bind_group(c.backend.wgpu.pass, 0, c.backend.wgpu.push_constant_group);
-	}
-}
-fn void cmd_set_push_constants_wgpu(Cmd* c, Device* device, Pipeline* pipeline, char[] bytes)
-{
-	if (pipeline == null || bytes.len == 0 || pipeline.backend.wgpu.push_constant_buffer == 0) return;
-	uint size = (uint)min(bytes.len, (sz)pipeline.backend.wgpu.push_constant_size);
-	if (size > 0) wgpu_queue_write_buffer(device.backend.wgpu.queue, pipeline.backend.wgpu.push_constant_buffer, 0, bytes.ptr, size);
-	if (c.backend.wgpu.pass != 0 && pipeline.backend.wgpu.push_constant_group != 0) wgpu_render_pass_set_bind_group(c.backend.wgpu.pass, 0, pipeline.backend.wgpu.push_constant_group);
-}
-fn void cmd_clear_attachment_regions_wgpu(Cmd* c, Device* device, CmdClearRegion[] regions)
-{
-	// A WebGPU loadOp=clear clears the whole attachment.  Never translate a
-	// region clear into it: that would silently erase pixels outside the region.
-	if (regions.len > 0) abort("WebGPU: partial attachment clears are unsupported");
-}
 
-fn void? cmd_bind_descriptors_wgpu(Cmd* c, Device* device, Pipeline* pipeline, DescriptorBinding[] bindings)
-{
-	if (c == null || pipeline == null || c.backend.wgpu.pass == 0) return UNKNOWN~;
-	PipelineWgpu* p = &pipeline.backend.wgpu;
-	DescriptorBinding[MAX_TEXTURE_BINDINGS] texture_bindings;
-	uint texture_binding_count = 0;
-	foreach (b : bindings)
-	{
-		if (b.descriptor.type == SAMPLED_IMAGE || b.descriptor.type == SAMPLER)
-		{
-			if (texture_binding_count >= texture_bindings.len) return TOO_MANY_TEXTURE_BINDINGS~;
-			texture_bindings[texture_binding_count++] = b;
-		}
-		else if (!descriptor_is_empty(b.descriptor)) return DESCRIPTOR_TYPE_MISMATCH~;
-	}
-	ResolvedDescriptorSlot[MAX_TEXTURE_BINDINGS] resolved = resolve_descriptor_slots(p.texture_slots[:p.texture_slot_count], texture_bindings[:texture_binding_count])!;
-	if (p.texture_slot_count == 0) return;
-	uint[32] entries;
-	uint count = 0;
-	for (uint i = 0; i < p.texture_slot_count; i++)
-	{
-		TextureSlot slot = p.texture_slots[i];
-		if (!resolved[i].has_texture) return DESCRIPTOR_MISSING~;
-		entries[count] = slot.binding; entries[count + 1] = (uint)resolved[i].texture.handle; count += 2;
-		if (resolved[i].has_sampler)
-		{
-			if (!slot.has_sampler_binding) return SAMPLER_REQUIRED~;
-			entries[count] = slot.sampler_binding; entries[count + 1] = (uint)resolved[i].sampler.handle; count += 2;
-		}
-	}
-	uint group = wgpu_device_create_bind_group_textures(device.backend.wgpu.device, p.texture_layout, &entries[0], count);
-	if (group == 0) return INITIALIZATION_FAILED~;
-	wgpu_render_pass_set_bind_group(c.backend.wgpu.pass, 1, group);
-	wgpu_release_if(&c.backend.wgpu.texture_bind_group);
-	c.backend.wgpu.texture_bind_group = group;
-	return;
-}
-
-fn void cmd_begin_rendering_wgpu(Cmd* c, Device* device, CmdBeginRenderingOptions options)
-{
-	CmdWgpu* s = &c.backend.wgpu;
-	if (s.encoder == 0 || options.color_attachments.len != 1) { wgpu_log_text("WebGPU: one color attachment is required"); return; }
-	if (s.pass != 0) { wgpu_render_pass_end(s.pass); s.pass = 0; }
-	CmdColorAttachment color = options.color_attachments[0];
-	uint depth_view = options.has_depth_attachment ? options.depth_attachment.view.backend.wgpu.view : 0;
-	uint color_load = color.load_op == LOAD ? 0 : 1;
-	uint color_store = color.store_op == STORE ? 0 : 1;
-	uint depth_load = options.has_depth_attachment && options.depth_attachment.load_op == LOAD ? 0 : 1;
-	uint depth_store = options.has_depth_attachment && options.depth_attachment.store_op == STORE ? 0 : 1;
-	s.pass = wgpu_command_encoder_begin_render_pass(s.encoder, color.view.backend.wgpu.view, color_load, color_store, color.clear_color[0], color.clear_color[1], color.clear_color[2], color.clear_color[3], depth_view, depth_load, depth_store, options.has_depth_attachment ? options.depth_attachment.clear_depth : 1);
-	if (s.pass != 0 && options.render_area.x >= 0 && options.render_area.y >= 0) wgpu_render_pass_set_scissor_rect(s.pass, (uint)options.render_area.x, (uint)options.render_area.y, options.render_area.width, options.render_area.height);
-}
-fn void cmd_end_rendering_wgpu(Cmd* c, Device* device)
-{
-	if (c.backend.wgpu.pass != 0) { wgpu_render_pass_end(c.backend.wgpu.pass); c.backend.wgpu.pass = 0; }
-}
-fn void cmd_bind_vertex_buffers_wgpu(Cmd* c, Device* device, uint first_binding, Buffer*[] buffers, ulong[] offsets = {})
-{
-	if (c.backend.wgpu.pass == 0) return;
-	foreach (i, b : buffers) if (b != null && b.cookie != 0) wgpu_render_pass_set_vertex_buffer(c.backend.wgpu.pass, first_binding + (uint)i, b.backend.wgpu.buffer, offsets.len == 0 ? 0 : (uint)offsets[i]);
-}
-fn void cmd_bind_index_buffer_wgpu(Cmd* c, Device* device, Buffer* buffer, IndexType index_type, ulong offset = 0)
-{
-	if (c.backend.wgpu.pass != 0 && buffer != null) { c.backend.wgpu.index_format = index_type == UINT16 ? 0 : 1; wgpu_render_pass_set_index_buffer(c.backend.wgpu.pass, buffer.backend.wgpu.buffer, c.backend.wgpu.index_format, (uint)offset); }
-}
-fn void cmd_resource_barrier_wgpu(Cmd* c, Device* device, MemoryBarrier[] memory = {}, BufferBarrier[] buffers = {}, ImageBarrier[] images = {}) {}
-fn void cmd_copy_buffer_to_texture_wgpu(Cmd* c, Device* device, CmdCopyBufferToTextureOptions options) { wgpu_log_text("WebGPU: buffer-to-texture copies are unsupported; use image_upload"); }
-fn void cmd_copy_texture_to_buffer_wgpu(Cmd* c, Device* device, CmdCopyTextureToBufferOptions options) { wgpu_log_text("WebGPU: texture-to-buffer copies are unsupported by the bridge"); }
-fn void cmd_copy_buffer_wgpu(Cmd* c, Device* device, Buffer* src, ulong src_offset, Buffer* dst, ulong dst_offset, ulong size)
-{
-	if (c.backend.wgpu.encoder != 0 && src != null && dst != null && size <= 0xFFFFFFFF) wgpu_command_encoder_copy_buffer_to_buffer(c.backend.wgpu.encoder, src.backend.wgpu.buffer, (uint)src_offset, dst.backend.wgpu.buffer, (uint)dst_offset, (uint)size);
-}
-fn void cmd_copy_image_wgpu(Cmd* c, Device* device, Image* src, Image* dst, ImageCopyDesc desc) { wgpu_log_text("WebGPU: image copies are unsupported by the bridge"); }
 
 // ---- canvas swapchain -----------------------------------------------------
 
 fn Swapchain? swapchain_init_wgpu(Device* device, SwapchainDesc desc, Allocator allocator = mem)
 {
-	if (device == null || desc.queue == null || desc.width == 0 || desc.height == 0) return INITIALIZATION_FAILED~;
+	assert(device != null && device.backend.wgpu.device != 0, "WebGPU swapchain requires an initialized device");
 	uint surface = 0;
 	SwapchainSurfaceFormat preferred;
 	if (desc.source.kind == WINDOW)
@@ -749,7 +528,8 @@ fn Swapchain? swapchain_init_wgpu(Device* device, SwapchainDesc desc, Allocator 
 	else if (desc.source.kind == SWAPCHAIN)
 	{
 		Swapchain* old = desc.source.swapchain;
-		if (old == null || old.backend.wgpu.surface == 0) return SURFACE_LOST~;
+		assert(old != null, "WebGPU swapchain source must be non-null");
+		if (old.backend.wgpu.surface == 0) return SURFACE_LOST~;
 		surface = old.backend.wgpu.surface;
 		preferred = { .gpu = old.backend.wgpu.format, .format = old.backend.wgpu.color_format };
 		old.backend.wgpu.surface = 0;
@@ -774,7 +554,8 @@ fn void swapchain_deinit_wgpu(Swapchain* s, Device* device)
 
 fn void? swapchain_recreate_wgpu(Swapchain* s, Device* device, ushort width, ushort height)
 {
-	if (width == 0 || height == 0 || s.backend.wgpu.surface == 0) return INITIALIZATION_FAILED~;
+	assert(s != null && device != null && s.backend.wgpu.surface != 0, "WebGPU recreate requires an initialized swapchain and device");
+	assert(width > 0 && height > 0, "swapchain dimensions must be nonzero");
 	wgpu_surface_configure(s.backend.wgpu.surface, device.backend.wgpu.device, (uint)s.backend.wgpu.format, width, height);
 	s.width = width; s.height = height;
 	return;
@@ -782,6 +563,7 @@ fn void? swapchain_recreate_wgpu(Swapchain* s, Device* device, ushort width, ush
 
 fn SwapchainStatus? swapchain_acquire_next_image_wgpu(Swapchain* s, Device* device, uint* out_index)
 {
+	assert(s != null && out_index != null && s.backend.wgpu.surface != 0, "WebGPU acquire requires a swapchain, surface, and output index");
 	wgpu_release_if(&s.backend.wgpu.current_view);
 	wgpu_release_if(&s.backend.wgpu.current_texture);
 	uint texture = wgpu_surface_get_current_texture(s.backend.wgpu.surface);
@@ -790,29 +572,29 @@ fn SwapchainStatus? swapchain_acquire_next_image_wgpu(Swapchain* s, Device* devi
 	if (view == 0) { wgpu_release(texture); return OUT_OF_DATE~; }
 	s.backend.wgpu.current_texture = texture;
 	s.backend.wgpu.current_view = view;
-	if (out_index != null) *out_index = 0;
+	*out_index = 0;
 	return OK;
 }
 
 fn Image swapchain_image_wgpu(Swapchain* s, uint index)
 {
-	if (index != 0 || s.backend.wgpu.current_texture == 0) return {};
+	assert(s != null && index == 0 && s.backend.wgpu.current_texture != 0, "WebGPU swapchain image is only available after acquiring image zero");
 	return { .cookie = s.backend.wgpu.current_texture, .backend.wgpu = { .texture = s.backend.wgpu.current_texture, .format = s.backend.wgpu.color_format, .image_type = D2, .width = s.width, .height = s.height, .depth = 1, .mip_levels = 1, .array_layers = 1 } };
 }
 fn ImageView swapchain_image_view_wgpu(Swapchain* s, uint index)
 {
-	if (index != 0 || s.backend.wgpu.current_view == 0) return {};
+	assert(s != null && index == 0 && s.backend.wgpu.current_view != 0, "WebGPU swapchain view is only available after acquiring image zero");
 	return { .cookie = s.backend.wgpu.current_view, .backend.wgpu = { .view = s.backend.wgpu.current_view } };
 }
 
 fn SwapchainStatus? swapchain_frame_submit_wgpu(Swapchain* s, Device* device, Queue* queue, SwapchainFrameSubmit submit)
 {
-	if (submit.image_index != 0 || queue == null) return OUT_OF_DATE~;
-	foreach (c : submit.cmds) if (c != null && c.backend.wgpu.command_buffer == 0) return UNKNOWN~;
+	assert(s != null && device != null && queue != null && submit.image_index == 0, "WebGPU submit requires a swapchain, device, queue, and image zero");
+	foreach (c : submit.cmds) assert(c != null && c.backend.wgpu.command_buffer != 0, "WebGPU submit requires ended command buffers");
 	if (submit.cmds.len > 0)
 	{
 		uint[64] commands;
-		if (submit.cmds.len > commands.len) return UNSUPPORTED_FEATURE~;
+		assert(submit.cmds.len <= commands.len, "WebGPU submit supports at most 64 command buffers");
 		foreach (i, c : submit.cmds) commands[i] = c.backend.wgpu.command_buffer;
 		wgpu_queue_submit(queue.backend.wgpu.queue, &commands[0], (uint)submit.cmds.len);
 	}

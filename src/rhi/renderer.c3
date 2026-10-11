@@ -18,8 +18,8 @@
 //   - backend_stubs.c3 declares empty stand-ins for backends that are not
 //     compiled on the current target so the union remains portable.
 //   - Dispatch: `switch (renderer.backend) { case VK: $if HAS_VK: return
-//     renderer_init_vk(...); $endif ... }`, falling through to
-//     `UNSUPPORTED_BACKEND`.
+//     renderer_init_vk(...); $endif ... }`, with an unsupported-backend error
+//     when the requested backend is not compiled into this target.
 //   - Errors use the faults from `rhi.c3`.
 module rhi;
 
@@ -332,7 +332,7 @@ fn void? renderer_init_vk(RendererVkOptions opt, Allocator allocator = mem)
 
 	vk::ValidationFeatureEnableEXT[1] enabled_validation_features = { DEBUG_PRINTF };
 	vk::ValidationFeaturesEXT validation_features = {
-		.sType = VALIDATION_FEATURES_EXT,
+		.sType = (vk::StructureType)1000247000,
 		.enabledValidationFeatureCount = enabled_validation_features.len,
 		.pEnabledValidationFeatures = &enabled_validation_features,
 	};
@@ -393,9 +393,9 @@ fn void? renderer_init_vk(RendererVkOptions opt, Allocator allocator = mem)
 	vk::InstanceCreateInfo create_info = {
 		.sType = INSTANCE_CREATE_INFO,
 		.pApplicationInfo = &app_info,
-		.ppEnabledLayerNames = enabled_layer_names.len() ? &enabled_layer_names[0] : null,
+		.ppEnabledLayerNames = enabled_layer_names.len() ? (ZString)&enabled_layer_names[0] : null,
 		.enabledLayerCount = (uint)enabled_layer_names.len(),
-		.ppEnabledExtensionNames = enabled_extension_names.len() ? &enabled_extension_names[0] : null,
+		.ppEnabledExtensionNames = enabled_extension_names.len() ? (ZString)&enabled_extension_names[0] : null,
 		.enabledExtensionCount = (uint)enabled_extension_names.len(),
 	};
 
@@ -410,7 +410,7 @@ fn void? renderer_init_vk(RendererVkOptions opt, Allocator allocator = mem)
 	if (opt.enable_validation_layer && vk::createDebugUtilsMessengerEXT)
 	{
 		vk::DebugUtilsMessengerCreateInfoEXT debug_create_info = {
-			.sType = DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+			.sType = (vk::StructureType)1000128004,
 			.pfnUserCallback = &vk_debug_messenger_callback,
 			.messageSeverity = vk::DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT
 				| vk::DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
@@ -443,7 +443,7 @@ fn void renderer_deinit_vk()
 	{
 		vk::destroyDebugUtilsMessengerEXT(vk_renderer.instance, vk_renderer.debug_messenger, null);
 	}
-	if (vk_renderer.instance != null) vk::destroyInstance(vk_renderer.instance, null);
+	if (vk_renderer.instance != (vk::Instance)0) vk::destroyInstance(vk_renderer.instance, null);
 	volk::finalize();
 	*vk_renderer = {};
 }

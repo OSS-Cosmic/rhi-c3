@@ -96,7 +96,7 @@ fn void constants_and_versions() @test
 	test::eq(KHR_SWAPCHAIN_EXTENSION_NAME.str_view(), "VK_KHR_swapchain");
 	test::eq((int)Format.R8G8B8A8_UNORM, 37);
 	test::eq((int)Result.ERROR_OUT_OF_DATE_KHR, -1000001004);
-	test::eq((int)StructureType.SWAPCHAIN_CREATE_INFO_KHR, 1000001000);
+	test::eq((int)StructureType.vk::SWAPCHAIN_CREATE_INFO_KHR, 1000001000);
 	ImageAspectFlags aspect = IMAGE_ASPECT_COLOR_BIT | IMAGE_ASPECT_DEPTH_BIT;
 	test::eq((uint)aspect, 3u);
 	test::eq((ulong)PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0x10000ul);

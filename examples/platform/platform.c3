@@ -41,15 +41,15 @@ struct App
 
 module platform @feat(!WASM & (LINUX | WIN32 | DARWIN));
 import rhi;
-import sdl3;
+import sdl3_compat;
 
 struct Window
 {
-	sdl3::Window handle;
-	sdl3::MetalView metal_view;
+	sdl3_compat::Window handle;
+	sdl3_compat::MetalView metal_view;
 }
 
-alias Event = sdl3::Event;
+alias Event = sdl3_compat::Event;
 
 String[] active_args;
 
@@ -59,13 +59,21 @@ fn PixelSize window_size_in_pixels(Window window)
 {
 	int width;
 	int height;
-	if (!window.handle || !sdl3::get_window_size_in_pixels(window.handle, &width, &height)) return {};
+	if (!window.handle || !sdl3_compat::get_window_size_in_pixels(window.handle, &width, &height)) return {};
 	return { .width = (uint)width, .height = (uint)height };
 }
 
-fn ulong perf_counter() => sdl3::get_performance_counter();
-fn ulong perf_frequency() => sdl3::get_performance_frequency();
-fn ulong ticks_ms() => sdl3::get_ticks();
+fn PixelSize window_size_in_points(Window window)
+{
+	int width;
+	int height;
+	if (!window.handle || !sdl3_compat::get_window_size(window.handle, &width, &height)) return {};
+	return { .width = (uint)width, .height = (uint)height };
+}
+
+fn ulong perf_counter() => sdl3_compat::get_performance_counter();
+fn ulong perf_frequency() => sdl3_compat::get_performance_frequency();
+fn ulong ticks_ms() => sdl3_compat::get_ticks();
 
 fn void apply_video_driver_arg(String[] args)
 {
@@ -83,8 +91,8 @@ fn void apply_video_driver_arg(String[] args)
 		}
 		if (value.len > 0)
 		{
-			sdl3::set_hint_with_priority(sdl3::SDL_HINT_VIDEO_DRIVER,
-				value.zstr_tcopy(), sdl3::SDL_HINT_OVERRIDE);
+			sdl3_compat::set_hint_with_priority(sdl3_compat::SDL_HINT_VIDEO_DRIVER,
+				value.zstr_tcopy(), sdl3_compat::SDL_HINT_OVERRIDE);
 			return;
 		}
 	}
@@ -98,36 +106,36 @@ fn rhi::WindowHandle window_handle(Window window)
 	$if env::DARWIN:
 		if (!window.metal_view) return result;
 		result.kind = rhi::WindowHandleKind.METAL;
-		result.metal = { .layer = sdl3::metal_get_layer(window.metal_view) };
+		result.metal = { .layer = sdl3_compat::metal_get_layer(window.metal_view) };
 		return result;
 	$endif
 
-	sdl3::Properties props = sdl3::get_window_properties(window.handle);
+	sdl3_compat::Properties props = sdl3_compat::get_window_properties(window.handle);
 	$if env::WIN32:
 		result.kind = rhi::WindowHandleKind.WIN32;
 		result.win32 = {
-			.hinstance = sdl3::get_pointer_property(props, sdl3::SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, null),
-			.hwnd = sdl3::get_pointer_property(props, sdl3::SDL_PROP_WINDOW_WIN32_HWND_POINTER, null),
+			.hinstance = sdl3_compat::get_pointer_property(props, sdl3_compat::SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, null),
+			.hwnd = sdl3_compat::get_pointer_property(props, sdl3_compat::SDL_PROP_WINDOW_WIN32_HWND_POINTER, null),
 		};
 		return result;
 	$endif
 
 	$if env::LINUX:
-		ZString driver = sdl3::get_current_video_driver();
+		ZString driver = sdl3_compat::get_current_video_driver();
 		if (driver == "x11")
 		{
 			result.kind = rhi::WindowHandleKind.X11;
 			result.x11 = {
-				.display = sdl3::get_pointer_property(props, sdl3::SDL_PROP_WINDOW_X11_DISPLAY_POINTER, null),
-				.window = (ulong)sdl3::get_number_property(props, sdl3::SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0),
+				.display = sdl3_compat::get_pointer_property(props, sdl3_compat::SDL_PROP_WINDOW_X11_DISPLAY_POINTER, null),
+				.window = (ulong)sdl3_compat::get_number_property(props, sdl3_compat::SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0),
 			};
 		}
 		else if (driver == "wayland")
 		{
 			result.kind = rhi::WindowHandleKind.WAYLAND;
 			result.wayland = {
-				.display = sdl3::get_pointer_property(props, sdl3::SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, null),
-				.surface = sdl3::get_pointer_property(props, sdl3::SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, null),
+				.display = sdl3_compat::get_pointer_property(props, sdl3_compat::SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, null),
+				.surface = sdl3_compat::get_pointer_property(props, sdl3_compat::SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, null),
 			};
 		}
 	$endif
@@ -154,51 +162,51 @@ fn AppResult run(App app, String[] args)
 {
 	active_args = args.len > 1 ? args[1..] : {};
 	apply_video_driver_arg(active_args);
-	if (!sdl3::init(sdl3::SDL_INIT_VIDEO))
+	if (!sdl3_compat::init(sdl3_compat::SDL_INIT_VIDEO))
 	{
 		active_args = {};
 		return FAILURE;
 	}
-	defer sdl3::quit();
+	defer sdl3_compat::quit();
 
-	sdl3::WindowFlags flags = sdl3::SDL_WINDOW_RESIZABLE;
+	sdl3_compat::WindowFlags flags = sdl3_compat::SDL_WINDOW_RESIZABLE;
 	$if env::DARWIN:
-		flags |= sdl3::SDL_WINDOW_METAL;
+		flags |= sdl3_compat::SDL_WINDOW_METAL;
 	$else
-		flags |= sdl3::SDL_WINDOW_VULKAN;
+		flags |= sdl3_compat::SDL_WINDOW_VULKAN;
 	$endif
 
 	// SDL_PollEvent is intentionally used instead of SDL_WaitEvent or a
 	// blocking pump.  This keeps the frame callback live during interactive
 	// resize, including Wayland's configure loop.
-	sdl3::Window native_window = sdl3::create_window(app.title.zstr_tcopy(), (int)app.width, (int)app.height, flags);
+	sdl3_compat::Window native_window = sdl3_compat::create_window(app.title.zstr_tcopy(), (int)app.width, (int)app.height, flags);
 	if (!native_window)
 	{
 		active_args = {};
 		return FAILURE;
 	}
-	defer sdl3::destroy_window(native_window);
+	defer sdl3_compat::destroy_window(native_window);
 
 	Window window = { .handle = native_window };
 	$if env::DARWIN:
-		window.metal_view = sdl3::metal_create_view(native_window);
+		window.metal_view = sdl3_compat::metal_create_view(native_window);
 		if (!window.metal_view)
 		{
 			active_args = {};
 			return FAILURE;
 		}
-		defer sdl3::metal_destroy_view(window.metal_view);
+		defer sdl3_compat::metal_destroy_view(window.metal_view);
 	$endif
 
 	AppResult result = CONTINUE;
 	if (app.init) result = app.init(window);
 	while (result == CONTINUE)
 	{
-		sdl3::Event event = {};
-		while (sdl3::poll_event(&event))
+		sdl3_compat::Event event = {};
+		while (sdl3_compat::poll_event(&event))
 		{
 			uint type = event.common.type;
-			if (type == sdl3::SDL_EVENT_QUIT || type == sdl3::SDL_EVENT_WINDOW_CLOSE_REQUESTED)
+			if (type == sdl3_compat::SDL_EVENT_QUIT || type == sdl3_compat::SDL_EVENT_WINDOW_CLOSE_REQUESTED)
 			{
 				result = SUCCESS;
 				break;

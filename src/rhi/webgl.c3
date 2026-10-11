@@ -8,6 +8,7 @@
 // the bridge blits that FBO to the canvas at frame submit.
 module rhi @feat(RHI_WEBGL & !RHI_HEADLESS & WASM);
 import std::collections::list;
+import std::math::geometry;
 
 alias GlHandle = uint;
 
@@ -248,7 +249,7 @@ struct PhysicalAdapterWebgl { bool available; }
 struct DeviceWebgl { bool alive; }
 struct QueueWebgl { bool alive; }
 struct TimelineWebgl { ulong completed; }
-struct PoolWebgl { bool alive; }
+struct PoolWebgl { char _unused; }
 struct BufferWebgl { GlHandle buffer; uint target; uint size; }
 struct ImageWebgl { GlHandle texture; uint width, height; WebglFormat format; }
 struct ImageViewWebgl { GlHandle texture; GlHandle framebuffer; uint width, height; }
@@ -260,7 +261,7 @@ struct WebglAttachment
 	GlHandle texture;
 	GlHandle framebuffer;
 	LoadOp load_op;
-	Rect rect;
+	std::math::geometry::Rect rect;
 	float[4] clear_color;
 }
 
@@ -275,7 +276,7 @@ struct WebglCommand
 {
 	WebglOp op;
 	Viewport viewport;
-	Rect rect;
+	std::math::geometry::Rect rect;
 	Pipeline* pipeline;
 	Buffer* buffer;
 	Buffer* src;
@@ -403,25 +404,6 @@ fn void? queue_wait_idle_webgl(Queue* q, Device* device)
 	return;
 }
 
-fn Pool? pool_init_webgl(Device* device, Queue* queue)
-{
-	if (device == null || queue == null) return INITIALIZATION_FAILED~;
-	Pool p = {};
-	p.backend.webgl.alive = true;
-	return p;
-}
-
-fn void? pool_reset_webgl(Pool* p, Device* device)
-{
-	if (p == null || !p.backend.webgl.alive) return INITIALIZATION_FAILED~;
-	return;
-}
-
-fn void pool_deinit_webgl(Pool* p, Device* device)
-{
-	if (p != null) p.backend.webgl.alive = false;
-}
-
 fn Timeline? timeline_init_webgl(Device* device)
 {
 	if (device == null) return INITIALIZATION_FAILED~;
@@ -460,25 +442,6 @@ fn void? queue_submit_webgl(Queue* q, Device* device, QueueSubmitDesc desc)
 
 // ---- resource creation --------------------------------------------------
 
-fn Buffer? buffer_init_general_webgl(Device* device, BufferDesc desc)
-{
-	uint size = web_buffer_size(desc.size, 256 * 1024 * 1024)!!;
-	Buffer b = {};
-	uint target = webgl_buffer_target(desc.usage);
-	b.backend.webgl.buffer = gl_create_buffer(target, size, webgl_buffer_usage(desc));
-	b.backend.webgl.size = size;
-	b.backend.webgl.target = target;
-	if (b.backend.webgl.buffer == 0) return OUT_OF_DEVICE_MEMORY~;
-	b.cookie = b.backend.webgl.buffer;
-	return b;
-}
-
-fn void buffer_deinit_webgl(Buffer* b, Device* device)
-{
-	if (b != null && b.backend.webgl.buffer != 0) gl_delete_buffer(b.backend.webgl.buffer);
-	if (b != null) b.backend.webgl.buffer = 0;
-}
-
 fn void buffer_write_webgl(Buffer* b, Device* device, sz offset, char[] bytes)
 {
 	if (b == null || b.backend.webgl.buffer == 0) return;
@@ -487,21 +450,6 @@ fn void buffer_write_webgl(Buffer* b, Device* device, sz offset, char[] bytes)
 }
 
 fn void buffer_flush_webgl(Buffer* b, Device* device) {}
-
-fn Image? image_init_webgl(Device* device, ImageDesc desc)
-{
-	if (desc.image_type != D2 || desc.width == 0 || desc.height == 0 || desc.mip_levels == 0) return UNSUPPORTED_FEATURE~;
-	WebglFormat f = webgl_format(desc.format);
-	if (!f.valid) return UNSUPPORTED_FEATURE~;
-	Image image = {};
-	image.backend.webgl.texture = gl_create_texture_2d(f.internal_format, desc.width, desc.height, desc.mip_levels);
-	image.backend.webgl.width = desc.width;
-	image.backend.webgl.height = desc.height;
-	image.backend.webgl.format = f;
-	if (image.backend.webgl.texture == 0) return OUT_OF_DEVICE_MEMORY~;
-	image.cookie = image.backend.webgl.texture;
-	return image;
-}
 
 fn void image_deinit_webgl(Image* image, Device* device)
 {
@@ -516,24 +464,6 @@ fn void? image_upload_webgl(Image* image, Device* device, ImageUploadOptions opt
 	WebglFormat f = image.backend.webgl.format;
 	gl_tex_sub_image_2d(image.backend.webgl.texture, options.mip_level, (int)options.origin.x, (int)options.origin.y, options.extent.width, options.extent.height, f.format, f.type, options.data.ptr, (uint)options.data.len);
 	return;
-}
-
-fn ImageView? image_view_init_webgl(Device* device, Image* image, ViewDesc desc)
-{
-	if (image == null || image.backend.webgl.texture == 0) return INITIALIZATION_FAILED~;
-	ImageView v = {};
-	v.backend.webgl.texture = image.backend.webgl.texture;
-	v.backend.webgl.width = image.backend.webgl.width;
-	v.backend.webgl.height = image.backend.webgl.height;
-	if (desc.view_type == COLOR_ATTACHMENT || desc.view_type == DEPTH_STENCIL_ATTACHMENT)
-	{
-		v.backend.webgl.framebuffer = gl_create_framebuffer();
-		uint attachment = desc.view_type == COLOR_ATTACHMENT ? GL_COLOR_ATTACHMENT0 : GL_DEPTH_STENCIL_ATTACHMENT;
-		gl_framebuffer_texture_2d(v.backend.webgl.framebuffer, attachment, v.backend.webgl.texture);
-		if (gl_check_framebuffer_status(v.backend.webgl.framebuffer) != 0x8CD5) return INITIALIZATION_FAILED~;
-	}
-	v.cookie = image.cookie ^ ((ulong)desc.base_mip << 32) ^ desc.base_layer + 1;
-	return v;
 }
 
 fn void image_view_deinit_webgl(ImageView* v, Device* device)
@@ -626,74 +556,14 @@ fn void pipeline_deinit_webgl(Pipeline* p, Device* device)
 
 fn WebglCommand* webgl_push(Cmd* c, WebglOp op)
 {
-	if (c == null || c.backend.webgl.command_count >= WEBGL_MAX_COMMANDS) return null;
+	assert(c != null, "WebGL command recording requires a command buffer");
+	assert(c.backend.webgl.command_count < WEBGL_MAX_COMMANDS, "WebGL command buffer capacity exceeded");
 	WebglCommand* out = &c.backend.webgl.commands[c.backend.webgl.command_count];
 	*out = {};
 	out.op = op;
 	c.backend.webgl.command_count += 1;
 	return out;
 }
-
-fn Cmd? cmd_init_webgl(Device* device, Pool* pool)
-{
-	if (device == null || pool == null) return INITIALIZATION_FAILED~;
-	WebglCommand[] commands = alloc::alloc_array_try(device.allocator, WebglCommand, WEBGL_MAX_COMMANDS)!;
-	commands[..] = {};
-	return { .barrier_capabilities = {}, .backend.webgl = { .commands = commands } };
-}
-
-fn void cmd_deinit_webgl(Cmd* c, Device* device, Pool* pool)
-{
-	if (c == null) return;
-	if (c.backend.webgl.commands.ptr != null) alloc::free(device.allocator, c.backend.webgl.commands.ptr);
-	c.backend.webgl = {};
-}
-fn void? cmd_begin_webgl(Cmd* c, Device* device) { if (c == null) return INITIALIZATION_FAILED~; c.backend.webgl.command_count = 0; return; }
-fn void? cmd_end_webgl(Cmd* c, Device* device) { if (c == null) return INITIALIZATION_FAILED~; return; }
-fn void cmd_set_viewport_webgl(Cmd* c, Device* device, Viewport vp) { WebglCommand* x = webgl_push(c, VIEWPORT); if (x != null) x.viewport = vp; }
-fn void cmd_set_scissor_webgl(Cmd* c, Device* device, Rect rect) { WebglCommand* x = webgl_push(c, SCISSOR); if (x != null) x.rect = rect; }
-fn void cmd_bind_pipeline_webgl(Cmd* c, Device* device, Pipeline* p) { WebglCommand* x = webgl_push(c, PIPELINE); if (x != null) x.pipeline = p; }
-fn void cmd_set_push_constants_webgl(Cmd* c, Device* device, Pipeline* p, char[] bytes)
-{
-	WebglCommand* x = webgl_push(c, PUSH_CONSTANTS); if (x == null) return;
-	x.pipeline = p; x.push_len = (uint)min(bytes.len, (sz)x.push_data.len); x.push_data[:x.push_len] = bytes[:x.push_len];
-}
-fn void cmd_draw_webgl(Cmd* c, Device* device, uint vertex_count, uint instance_count, uint first_vertex, uint first_instance) { WebglCommand* x = webgl_push(c, DRAW); if (x != null) { x.count = vertex_count; x.instance_count = instance_count; x.first = first_vertex; } }
-fn void cmd_draw_indexed_webgl(Cmd* c, Device* device, uint index_count, uint instance_count, uint first_index, int vertex_offset, uint first_instance) { WebglCommand* x = webgl_push(c, DRAW_INDEXED); if (x != null) { x.count = index_count; x.instance_count = instance_count; x.first = first_index; x.vertex_offset = vertex_offset; } }
-fn void cmd_draw_indirect_webgl(Cmd* c, Device* device, Buffer* b, ulong offset, uint draw_count, uint stride) {}
-fn void cmd_draw_indexed_indirect_webgl(Cmd* c, Device* device, Buffer* b, ulong offset, uint draw_count, uint stride) {}
-fn void cmd_draw_indirect_count_webgl(Cmd* c, Device* device, Buffer* b, ulong offset, Buffer* count_buffer, ulong count_offset, uint max_draw_count, uint stride) {}
-fn void cmd_clear_attachment_regions_webgl(Cmd* c, Device* device, CmdClearRegion[] regions)
-{
-	WebglCommand* x = webgl_push(c, CLEAR_REGIONS); if (x == null) return; x.attachment_count = (uint)min(regions.len, (sz)8); foreach (i, region : regions[:x.attachment_count]) { x.attachments[i].clear_color = region.color; x.attachments[i].rect = region.rect; x.attachments[i].load_op = CLEAR; x.attachments[i].framebuffer = 0; x.attachments[i].texture = 0; }
-}
-fn void? cmd_bind_descriptors_webgl(Cmd* c, Device* device, Pipeline* p, DescriptorBinding[] bindings)
-{
-	WebglCommand* x = webgl_push(c, DESCRIPTORS); if (x == null) return INITIALIZATION_FAILED~; x.pipeline = p; x.descriptor_count = (uint)min(bindings.len, (sz)MAX_TEXTURE_BINDINGS); x.descriptors[:x.descriptor_count] = bindings[:x.descriptor_count]; return;
-}
-fn void cmd_begin_rendering_webgl(Cmd* c, Device* device, CmdBeginRenderingOptions options)
-{
-	WebglCommand* x = webgl_push(c, BEGIN_RENDERING); if (x == null) return; x.rect = options.render_area; x.width = options.render_area.width; x.height = options.render_area.height; x.attachment_count = (uint)min(options.color_attachments.len, (sz)8); foreach (i, a : options.color_attachments[:x.attachment_count]) { x.attachments[i].texture = a.view.backend.webgl.texture; x.attachments[i].framebuffer = a.view.backend.webgl.framebuffer; x.attachments[i].load_op = a.load_op; x.attachments[i].clear_color = a.clear_color; } if (x.attachment_count > 0) x.framebuffer = x.attachments[0].framebuffer; c.backend.webgl.pass_open = true;
-	if (options.has_depth_attachment)
-	{
-		x.has_depth = true;
-		x.clear_depth = options.depth_attachment.load_op == CLEAR;
-		x.depth = options.depth_attachment.clear_depth;
-		if (x.framebuffer == 0) x.framebuffer = options.depth_attachment.view.backend.webgl.framebuffer;
-		gl_framebuffer_texture_2d(x.framebuffer, GL_DEPTH_ATTACHMENT, options.depth_attachment.view.backend.webgl.texture);
-	}
-}
-fn void cmd_end_rendering_webgl(Cmd* c, Device* device) { WebglCommand* x = webgl_push(c, END_RENDERING); if (x != null) c.backend.webgl.pass_open = false; }
-fn void cmd_bind_vertex_buffers_webgl(Cmd* c, Device* device, uint first_binding, Buffer*[] buffers, ulong[] offsets = {})
-{
-	WebglCommand* x = webgl_push(c, VERTEX_BUFFERS); if (x == null) return; x.first_binding = first_binding; x.buffer_count = (uint)min(buffers.len, (sz)8); foreach (i, b : buffers[:x.buffer_count]) { x.buffers[i] = b; x.offsets[i] = offsets.len == buffers.len ? offsets[i] : 0; }
-}
-fn void cmd_bind_index_buffer_webgl(Cmd* c, Device* device, Buffer* b, IndexType index_type, ulong offset = 0) { WebglCommand* x = webgl_push(c, INDEX_BUFFER); if (x != null) { x.buffer = b; x.index_type = index_type; x.offset = offset; } }
-fn void cmd_resource_barrier_webgl(Cmd* c, Device* device, MemoryBarrier[] memory, BufferBarrier[] buffers, ImageBarrier[] images) {}
-fn void cmd_copy_buffer_webgl(Cmd* c, Device* device, Buffer* src, ulong src_offset, Buffer* dst, ulong dst_offset, ulong size) { WebglCommand* x = webgl_push(c, COPY_BUFFER); if (x != null) { x.src = src; x.dst = dst; x.src_offset = src_offset; x.dst_offset = dst_offset; x.size = size; } }
-fn void cmd_copy_buffer_to_texture_webgl(Cmd* c, Device* device, CmdCopyBufferToTextureOptions options) { WebglCommand* x = webgl_push(c, COPY_BUFFER_TEXTURE); if (x != null) { x.src = options.src; x.image = options.dst; x.offset = options.buffer_offset; x.rect = { .x = options.x, .y = options.y, .width = options.width, .height = options.height }; } }
-fn void cmd_copy_texture_to_buffer_webgl(Cmd* c, Device* device, CmdCopyTextureToBufferOptions options) {}
-fn void cmd_copy_image_webgl(Cmd* c, Device* device, Image* src, Image* dst, ImageCopyDesc desc) { WebglCommand* x = webgl_push(c, COPY_IMAGE); if (x != null) { x.image = src; x.image_dst = dst; x.image_copy = desc; } }
 
 fn void webgl_apply_pipeline(PipelineWebgl* p)
 {
@@ -735,7 +605,7 @@ fn void webgl_replay_cmd(Cmd* c, Device* device)
 			case VIEWPORT:
 				Viewport v = cmd.viewport; int h = (int)v.height; int y = target_height - (int)v.y - (h < 0 ? -h : h); if (h < 0) h = -h; gl_viewport((int)v.x, y, (int)v.width, h, v.min_depth, v.max_depth);
 			case SCISSOR:
-				gl_set_enabled(GL_SCISSOR_TEST, true); gl_scissor(cmd.rect.x, target_height - cmd.rect.y - (int)cmd.rect.height, cmd.rect.width, cmd.rect.height);
+				gl_set_enabled(GL_SCISSOR_TEST, true); gl_scissor((int)cmd.rect.x, target_height - (int)cmd.rect.y - (int)cmd.rect.height, (uint)cmd.rect.width, (uint)cmd.rect.height);
 			case PIPELINE:
 				if (cmd.pipeline != null) { c.backend.webgl.current_pipeline = cmd.pipeline; webgl_apply_pipeline(&cmd.pipeline.backend.webgl); }
 			case PUSH_CONSTANTS:
@@ -751,11 +621,11 @@ fn void webgl_replay_cmd(Cmd* c, Device* device)
 			case DRAW_INDEXED:
 				if (c.backend.webgl.current_pipeline != null) gl_draw_elements(webgl_topology(c.backend.webgl.current_pipeline.backend.webgl.raster.topology), cmd.count, cmd.index_type == UINT16 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT, (uint)cmd.offset, cmd.instance_count);
 			case CLEAR_REGIONS:
-				foreach (a : cmd.attachments[:cmd.attachment_count]) { gl_scissor(a.rect.x, target_height - a.rect.y - (int)a.rect.height, a.rect.width, a.rect.height); gl_clear_color(a.clear_color[0], a.clear_color[1], a.clear_color[2], a.clear_color[3]); }
+				foreach (a : cmd.attachments[:cmd.attachment_count]) { gl_scissor((int)a.rect.x, target_height - (int)a.rect.y - (int)a.rect.height, (uint)a.rect.width, (uint)a.rect.height); gl_clear_color(a.clear_color[0], a.clear_color[1], a.clear_color[2], a.clear_color[3]); }
 			case COPY_BUFFER:
 				if (cmd.src != null && cmd.dst != null) gl_copy_buffer_sub_data(cmd.src.backend.webgl.target, cmd.src.backend.webgl.buffer, (uint)cmd.src_offset, cmd.dst.backend.webgl.target, cmd.dst.backend.webgl.buffer, (uint)cmd.dst_offset, (uint)cmd.size);
 			case COPY_BUFFER_TEXTURE:
-				if (cmd.src != null && cmd.image != null) gl_tex_sub_image_2d_from_buffer(cmd.image.backend.webgl.texture, 0, cmd.rect.x, cmd.rect.y, cmd.rect.width, cmd.rect.height, cmd.image.backend.webgl.format.format, cmd.image.backend.webgl.format.type, cmd.src.backend.webgl.buffer, (uint)cmd.offset, 0);
+				if (cmd.src != null && cmd.image != null) gl_tex_sub_image_2d_from_buffer(cmd.image.backend.webgl.texture, 0, (int)cmd.rect.x, (int)cmd.rect.y, (uint)cmd.rect.width, (uint)cmd.rect.height, cmd.image.backend.webgl.format.format, cmd.image.backend.webgl.format.type, cmd.src.backend.webgl.buffer, (uint)cmd.offset, 0);
 			case COPY_TEXTURE_BUFFER:
 				// Texture readback is not exposed by the browser bridge yet.
 				break;
@@ -783,8 +653,8 @@ fn CommandRingBuffer{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE}? command_ring_buf
 	r.backend.webgl.alive = true;
 	for (sz i = 0; i < (sz)POOL_COUNT; i++)
 	{
-		r.pools[i] = pool_init_webgl(device, queue)!;
-		for (sz j = 0; j < (sz)CMD_PER_POOL; j++) r.cmds[i][j] = cmd_init_webgl(device, &r.pools[i])!;
+		r.pools[i] = pool_init(device, queue)!;
+		for (sz j = 0; j < (sz)CMD_PER_POOL; j++) r.cmds[i][j] = cmd_init(device, &r.pools[i])!;
 	}
 	return r;
 }
@@ -794,8 +664,8 @@ fn void command_ring_buffer_deinit_webgl(CommandRingBuffer{POOL_COUNT, CMD_PER_P
 	if (r == null) return;
 	for (sz i = 0; i < (sz)POOL_COUNT; i++)
 	{
-		for (sz j = 0; j < (sz)CMD_PER_POOL; j++) cmd_deinit_webgl(&r.cmds[i][j], device, &r.pools[i]);
-		pool_deinit_webgl(&r.pools[i], device);
+		for (sz j = 0; j < (sz)CMD_PER_POOL; j++) cmd_deinit(&r.cmds[i][j], device, &r.pools[i]);
+		pool_deinit(&r.pools[i], device);
 	}
 	r.backend.webgl.alive = false;
 }
@@ -827,7 +697,7 @@ fn Swapchain? swapchain_init_webgl(Device* device, SwapchainDesc desc, Allocator
 
 fn void swapchain_deinit_webgl(Swapchain* s, Device* device)
 {
-	if (s == null) return;
+	assert(s != null, "WebGL swapchain deinit requires an initialized swapchain");
 	if (s.backend.webgl.framebuffer != 0) gl_delete_framebuffer(s.backend.webgl.framebuffer);
 	if (s.backend.webgl.color_texture != 0) gl_delete_texture(s.backend.webgl.color_texture);
 	s.backend.webgl.framebuffer = 0; s.backend.webgl.color_texture = 0;
@@ -835,7 +705,8 @@ fn void swapchain_deinit_webgl(Swapchain* s, Device* device)
 
 fn void? swapchain_recreate_webgl(Swapchain* s, Device* device, ushort width, ushort height)
 {
-	if (s == null || width == 0 || height == 0) return INITIALIZATION_FAILED~;
+	assert(s != null, "WebGL recreate requires an initialized swapchain");
+	assert(width > 0 && height > 0, "swapchain dimensions must be nonzero");
 	if (s.backend.webgl.framebuffer != 0) gl_delete_framebuffer(s.backend.webgl.framebuffer);
 	if (s.backend.webgl.color_texture != 0) gl_delete_texture(s.backend.webgl.color_texture);
 	s.backend.webgl.color_texture = gl_create_texture_2d(GL_RGBA8, width, height, 1);
@@ -845,12 +716,13 @@ fn void? swapchain_recreate_webgl(Swapchain* s, Device* device, ushort width, us
 	return;
 }
 
-fn SwapchainStatus? swapchain_acquire_next_image_webgl(Swapchain* s, Device* device, uint* out_index) { if (s == null || s.image_count == 0) return OUT_OF_DATE~; if (out_index != null) *out_index = 0; return OK; }
-fn Image swapchain_image_webgl(Swapchain* s, uint index) { if (s == null || index != 0) return {}; Image i = {}; i.cookie = s.backend.webgl.color_texture; i.backend.webgl.texture = s.backend.webgl.color_texture; i.backend.webgl.width = s.width; i.backend.webgl.height = s.height; i.backend.webgl.format = webgl_format(RGBA8_UNORM); return i; }
-fn ImageView swapchain_image_view_webgl(Swapchain* s, uint index) { if (s == null || index != 0) return {}; ImageView v = {}; v.cookie = s.backend.webgl.color_texture; v.backend.webgl.texture = s.backend.webgl.color_texture; v.backend.webgl.framebuffer = s.backend.webgl.framebuffer; v.backend.webgl.width = s.width; v.backend.webgl.height = s.height; return v; }
+fn SwapchainStatus? swapchain_acquire_next_image_webgl(Swapchain* s, Device* device, uint* out_index) { assert(s != null && s.image_count == 1, "WebGL acquire requires an initialized swapchain"); assert(out_index != null, "WebGL acquire requires an output index"); *out_index = 0; return OK; }
+fn Image swapchain_image_webgl(Swapchain* s, uint index) { assert(s != null && index == 0 && s.image_count == 1, "WebGL swapchain image index is out of range"); Image i = {}; i.cookie = s.backend.webgl.color_texture; i.backend.webgl.texture = s.backend.webgl.color_texture; i.backend.webgl.width = s.width; i.backend.webgl.height = s.height; i.backend.webgl.format = webgl_format(RGBA8_UNORM); return i; }
+fn ImageView swapchain_image_view_webgl(Swapchain* s, uint index) { assert(s != null && index == 0 && s.image_count == 1, "WebGL swapchain view index is out of range"); ImageView v = {}; v.cookie = s.backend.webgl.color_texture; v.backend.webgl.texture = s.backend.webgl.color_texture; v.backend.webgl.framebuffer = s.backend.webgl.framebuffer; v.backend.webgl.width = s.width; v.backend.webgl.height = s.height; return v; }
 fn SwapchainStatus? swapchain_frame_submit_webgl(Swapchain* s, Device* device, Queue* queue, SwapchainFrameSubmit submit)
 {
-	if (s == null || submit.image_index != 0) return OUT_OF_DATE~;
+	assert(s != null && device != null && queue != null, "WebGL submit requires a swapchain, device, and queue");
+	assert(submit.image_index == 0, "WebGL submit image index must be zero");
 	queue_submit_webgl(queue, device, { .cmds = submit.cmds, .signals = {} })!;
 	gl_blit_to_canvas(s.backend.webgl.framebuffer, s.width, s.height);
 	if (submit.timeline != null) submit.timeline.backend.webgl.completed = submit.signal_value != 0 ? submit.signal_value : submit.timeline.signal_value;

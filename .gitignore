@@ -1,6 +1,7 @@
 # Build output
 /build/
 /obj/
+/sdl3.c3l
 
 # Python
 __pycache__/
@@ -10,7 +11,7 @@ __pycache__/
 /build-meson/
 
 # Vendored libraries (built by Meson, see meson.build)
-/vendor/vma/lib/
+/vendor/lib/
 /vendor/volk/lib/
 /vendor/imgui_c/lib/
 /vendor/d3d12ma/lib/

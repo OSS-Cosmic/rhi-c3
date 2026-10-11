@@ -101,7 +101,7 @@ fn Shader? shader_init_graphics(Device* device, ShaderGraphicsOptions options)
 				return shader_init_graphics_webgl(device, options);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void shader_deinit(Shader* s, Device* device)
@@ -423,22 +423,22 @@ fn void? shader_create_module_vk(Device* device, char[] data, vk::ShaderModule* 
 
 fn void shader_destroy_modules_vk(Device* device, ShaderVk* shader) @private
 {
-	if (shader.vertex_module != vk::NULL_HANDLE) {
+	if (shader.vertex_module != (vk::ShaderModule)0) {
 		device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader.vertex_module, null);
 	}
-	if (shader.tesselation_control_module != vk::NULL_HANDLE) {
+	if (shader.tesselation_control_module != (vk::ShaderModule)0) {
 		device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader.tesselation_control_module, null);
 	}
-	if (shader.tesselation_evaluation_module != vk::NULL_HANDLE) {
+	if (shader.tesselation_evaluation_module != (vk::ShaderModule)0) {
 		device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader.tesselation_evaluation_module, null);
 	}
-	if (shader.geometry_module != vk::NULL_HANDLE) {
+	if (shader.geometry_module != (vk::ShaderModule)0) {
 		device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader.geometry_module, null);
 	}
-	if (shader.pixel_module != vk::NULL_HANDLE) {
+	if (shader.pixel_module != (vk::ShaderModule)0) {
 		device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader.pixel_module, null);
 	}
-	if (shader.compute_module != vk::NULL_HANDLE) {
+	if (shader.compute_module != (vk::ShaderModule)0) {
 		device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader.compute_module, null);
 	}
 	*shader = {};
@@ -500,11 +500,11 @@ fn void shader_deinit_vk(Shader* shader, Device* device)
 fn ShaderStages shader_stages_vk(Shader* shader)
 {
 	ShaderStages stages = {};
-	stages.vertex = shader.backend.vk.vertex_module != vk::NULL_HANDLE;
-	stages.tesselation_control = shader.backend.vk.tesselation_control_module != vk::NULL_HANDLE;
-	stages.tesselation_evaluation = shader.backend.vk.tesselation_evaluation_module != vk::NULL_HANDLE;
-	stages.geometry = shader.backend.vk.geometry_module != vk::NULL_HANDLE;
-	stages.pixel = shader.backend.vk.pixel_module != vk::NULL_HANDLE;
-	stages.compute = shader.backend.vk.compute_module != vk::NULL_HANDLE;
+	stages.vertex = shader.backend.vk.vertex_module != (vk::ShaderModule)0;
+	stages.tesselation_control = shader.backend.vk.tesselation_control_module != (vk::ShaderModule)0;
+	stages.tesselation_evaluation = shader.backend.vk.tesselation_evaluation_module != (vk::ShaderModule)0;
+	stages.geometry = shader.backend.vk.geometry_module != (vk::ShaderModule)0;
+	stages.pixel = shader.backend.vk.pixel_module != (vk::ShaderModule)0;
+	stages.compute = shader.backend.vk.compute_module != (vk::ShaderModule)0;
 	return stages;
 }

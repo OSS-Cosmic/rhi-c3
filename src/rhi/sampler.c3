@@ -62,7 +62,7 @@ fn Sampler? sampler_init(Device* device, SamplerDesc desc)
 		case MTL:
 			$if HAS_MTL: return sampler_init_mtl(device, desc); $endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void sampler_deinit(Sampler* s, Device* device)
@@ -336,7 +336,7 @@ fn Sampler? sampler_init_vk(Device* device, SamplerDesc desc)
 
 fn void sampler_deinit_vk(Sampler* sampler, Device* device)
 {
-	if (sampler.backend.vk.sampler != vk::NULL_HANDLE) {
+	if (sampler.backend.vk.sampler != (vk::Sampler)0) {
 		device.backend.vk.vtable.destroySampler(device.backend.vk.device, sampler.backend.vk.sampler, null);
 	}
 	sampler.backend.vk = {};

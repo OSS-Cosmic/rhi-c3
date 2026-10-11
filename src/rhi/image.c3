@@ -4,6 +4,7 @@
 // Backend-neutral image handle. Port of the Vulkan arm of rhi-zig's
 // `image.zig` `Image` type.
 module rhi;
+import d3d12, dxgi, d3d12ma, mtl, vk, vma;
 
 enum ImageType : char
 {
@@ -138,26 +139,172 @@ fn Image? image_init(Device* device, ImageDesc desc)
 	{
 		case VK:
 			$if HAS_VK:
-				return image_init_vk(device, desc);
+				{
+					if (desc.width == 0 || desc.height == 0 || desc.depth == 0 || desc.mip_levels == 0 || desc.array_layers == 0) {
+						return UNSUPPORTED_FEATURE~;
+					}
+					vk::ImageCreateFlags create_flags;
+					if (desc.flags.cube_compatible) create_flags |= vk::IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+					if (desc.flags.block_texel_view_compatible) create_flags |= vk::IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT;
+					vk::ImageCreateInfo create_info = {
+						.sType = vk::StructureType.IMAGE_CREATE_INFO,
+						.flags = create_flags,
+						.imageType = image_type_vk(desc.image_type),
+						.format = to_vk_format(desc.format),
+						.extent = { .width = desc.width, .height = desc.height, .depth = desc.depth },
+						.mipLevels = desc.mip_levels,
+						.arrayLayers = desc.array_layers,
+						.samples = (vk::SampleCountFlagBits)image_samples_vk(desc.samples),
+						.tiling = desc.tiling == OPTIMAL ? vk::ImageTiling.OPTIMAL : vk::ImageTiling.LINEAR,
+						.usage = image_usage_flags_vk(desc.usage),
+						.sharingMode = vk::SharingMode.EXCLUSIVE,
+						.initialLayout = vk::ImageLayout.UNDEFINED,
+					};
+					vma::AllocationCreateInfo allocation_info = { .usage = image_memory_usage_vk(desc.memory_usage) };
+					vk::Image image;
+					vma::Allocation allocation;
+					vma::AllocationInfo vma_info;
+					vk_check(vma::create_image(device.backend.vk.vma_allocator, &create_info, &allocation_info, &image, &allocation, &vma_info))!;
+					return {
+						.cookie = next_cookie(),
+						.backend.vk = { .image = image, .allocation = allocation, .format = create_info.format, .borrowed = false },
+					};
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				return image_init_dx12(device, desc);
+				{
+					if (desc.width == 0 || desc.height == 0 || desc.depth == 0 ||
+						desc.mip_levels == 0 || desc.array_layers == 0 ||
+						desc.mip_levels > 0xFFFF || desc.array_layers > 0xFFFF || desc.depth > 0xFFFF)
+					{
+						return UNSUPPORTED_FEATURE~;
+					}
+
+					dxgi::Format dxgi_format = format_to_dxgi(desc.format);
+					if (dxgi_format == dxgi::Format.UNKNOWN) return UNSUPPORTED_FEATURE~;
+					FormatProperties props = format_get_props(desc.format);
+
+					d3d12::ResourceDimension dimension;
+					ushort depth_or_array_size = (ushort)desc.array_layers;
+					switch (desc.image_type)
+					{
+						case D1:
+							if (desc.height != 1 || desc.depth != 1 || desc.samples != S1) return UNSUPPORTED_FEATURE~;
+							dimension = d3d12::ResourceDimension.TEXTURE1D;
+						case D2:
+							if (desc.depth != 1) return UNSUPPORTED_FEATURE~;
+							if (desc.flags.cube_compatible && (desc.samples != S1 || desc.array_layers < 6 || desc.array_layers % 6 != 0))
+							{
+								return UNSUPPORTED_FEATURE~;
+							}
+							dimension = d3d12::ResourceDimension.TEXTURE2D;
+						case D3:
+							if (desc.array_layers != 1 || desc.samples != S1) return UNSUPPORTED_FEATURE~;
+							dimension = d3d12::ResourceDimension.TEXTURE3D;
+							depth_or_array_size = (ushort)desc.depth;
+					}
+
+					// Depth formats are created typeless so the same resource can back both a
+					// depth-stencil view and a shader-resource view.
+					if (props.is_depth) dxgi_format = format_to_dxgi_typeless(desc.format);
+
+					d3d12::ResourceFlags flags = d3d12::RESOURCE_FLAG_NONE;
+					if (desc.usage.color_attachment) flags |= d3d12::RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+					if (desc.usage.depth_stencil_attachment)
+					{
+						flags |= d3d12::RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+						if (!desc.usage.sampled && !desc.usage.input_attachment)
+						{
+							flags |= d3d12::RESOURCE_FLAG_DENY_SHADER_RESOURCE;
+						}
+					}
+					if (desc.usage.storage) flags |= d3d12::RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+					d3d12::ResourceDesc resource_desc = {
+						.dimension = dimension,
+						.alignment = 0,
+						.width = desc.width,
+						.height = desc.height,
+						.depth_or_array_size = depth_or_array_size,
+						.mip_levels = (ushort)desc.mip_levels,
+						.format = dxgi_format,
+						.sample_desc = { .count = dx12_sample_count(desc.samples), .quality = 0 },
+						.layout = d3d12::TextureLayout.UNKNOWN,
+						.flags = flags,
+					};
+
+					// Textures always live in device-local memory; D3D12 has no useful
+					// host-visible texture heap, so PREFER_HOST is treated as AUTO.
+					d3d12ma::AllocationDesc alloc_desc = { .heap_type = (int)d3d12::HeapType.DEFAULT };
+					d3d12ma::Allocation allocation;
+					d3d12::Resource* resource;
+					int hr = d3d12ma::create_resource(
+						device.backend.dx12.allocator, &alloc_desc, &resource_desc,
+						(uint)d3d12::RESOURCE_STATE_COMMON, null, &allocation, (void**)&resource);
+					if (dxgi::failed(hr) || !allocation) return OUT_OF_DEVICE_MEMORY~;
+					// The allocation owns the resource; drop the extra reference handed back.
+					if (resource) dxgi::release(resource);
+
+					return {
+						.cookie = next_cookie(),
+						.backend.dx12 = {
+							.allocation = allocation,
+							.resource = (d3d12::Resource*)d3d12ma::allocation_get_resource(allocation),
+							.format = desc.format,
+							.image_type = desc.image_type,
+							.width = desc.width,
+							.height = desc.height,
+							.depth = desc.depth,
+							.mip_levels = desc.mip_levels,
+							.array_layers = desc.array_layers,
+							.sample_count = dx12_sample_count(desc.samples),
+						},
+					};
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				return image_init_mtl_impl(device, desc);
+				{
+					ImageMtlState state = mtl_image_create_state(device, desc)!!;
+					return {
+						.cookie = next_cookie(),
+						.backend.mtl = state,
+					};
+				}
 			$endif
 		case WGPU:
 			$if HAS_WGPU:
-				return image_init_wgpu(device, desc);
+				{
+					if (desc.width == 0 || desc.height == 0 || desc.depth == 0 || desc.mip_levels == 0 || desc.array_layers == 0) return UNSUPPORTED_FEATURE~;
+					WgpuTextureFormat format = wgpu_format(desc.format)!!;
+					uint dimension = desc.image_type == D1 ? 0 : desc.image_type == D2 ? 1 : 2;
+					uint depth_or_layers = desc.image_type == D3 ? desc.depth : desc.array_layers;
+					if (desc.image_type == D1 && (desc.height != 1 || desc.depth != 1)) return UNSUPPORTED_FEATURE~;
+					if (desc.image_type == D3 && desc.array_layers != 1) return UNSUPPORTED_FEATURE~;
+					uint texture = wgpu_device_create_texture(device.backend.wgpu.device, (uint)format, desc.width, desc.height, depth_or_layers, desc.mip_levels, wgpu_sample_count(desc.samples), dimension, wgpu_image_usage(desc.usage));
+					if (texture == 0) return OUT_OF_DEVICE_MEMORY~;
+					return { .cookie = next_cookie(), .backend.wgpu = { .texture = texture, .format = desc.format, .image_type = desc.image_type, .width = desc.width, .height = desc.height, .depth = desc.depth, .mip_levels = desc.mip_levels, .array_layers = desc.array_layers } };
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				return image_init_webgl(device, desc);
+				{
+					if (desc.image_type != D2 || desc.width == 0 || desc.height == 0 || desc.mip_levels == 0) return UNSUPPORTED_FEATURE~;
+					WebglFormat f = webgl_format(desc.format);
+					if (!f.valid) return UNSUPPORTED_FEATURE~;
+					Image image = {};
+					image.backend.webgl.texture = gl_create_texture_2d(f.internal_format, desc.width, desc.height, desc.mip_levels);
+					image.backend.webgl.width = desc.width;
+					image.backend.webgl.height = desc.height;
+					image.backend.webgl.format = f;
+					if (image.backend.webgl.texture == 0) return OUT_OF_DEVICE_MEMORY~;
+					image.cookie = image.backend.webgl.texture;
+					return image;
+				}
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void image_deinit(Image* img, Device* device)
@@ -213,7 +360,7 @@ fn void? image_upload(Image* image, Device* device, ImageUploadOptions options)
 				return image_upload_webgl(image, device, options);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn bool image_is_empty(Image* img)
@@ -364,15 +511,6 @@ fn ImageMtlState? mtl_image_create_state(Device* device, ImageDesc desc)
 		.depth = desc.depth,
 		.mip_levels = desc.mip_levels,
 		.array_layers = desc.array_layers,
-	};
-}
-
-fn Image? image_init_mtl_impl(Device* device, ImageDesc desc)
-{
-	ImageMtlState state = mtl_image_create_state(device, desc)!!;
-	return {
-		.cookie = next_cookie(),
-		.backend.mtl = state,
 	};
 }
 
@@ -536,97 +674,6 @@ fn uint dx12_sample_count(ImageSampleCount samples)
 	}
 }
 
-fn Image? image_init_dx12(Device* device, ImageDesc desc)
-{
-	if (desc.width == 0 || desc.height == 0 || desc.depth == 0 ||
-		desc.mip_levels == 0 || desc.array_layers == 0 ||
-		desc.mip_levels > 0xFFFF || desc.array_layers > 0xFFFF || desc.depth > 0xFFFF)
-	{
-		return UNSUPPORTED_FEATURE~;
-	}
-
-	dxgi::Format dxgi_format = format_to_dxgi(desc.format);
-	if (dxgi_format == dxgi::Format.UNKNOWN) return UNSUPPORTED_FEATURE~;
-	FormatProperties props = format_get_props(desc.format);
-
-	d3d12::ResourceDimension dimension;
-	ushort depth_or_array_size = (ushort)desc.array_layers;
-	switch (desc.image_type)
-	{
-		case D1:
-			if (desc.height != 1 || desc.depth != 1 || desc.samples != S1) return UNSUPPORTED_FEATURE~;
-			dimension = d3d12::ResourceDimension.TEXTURE1D;
-		case D2:
-			if (desc.depth != 1) return UNSUPPORTED_FEATURE~;
-			if (desc.flags.cube_compatible && (desc.samples != S1 || desc.array_layers < 6 || desc.array_layers % 6 != 0))
-			{
-				return UNSUPPORTED_FEATURE~;
-			}
-			dimension = d3d12::ResourceDimension.TEXTURE2D;
-		case D3:
-			if (desc.array_layers != 1 || desc.samples != S1) return UNSUPPORTED_FEATURE~;
-			dimension = d3d12::ResourceDimension.TEXTURE3D;
-			depth_or_array_size = (ushort)desc.depth;
-	}
-
-	// Depth formats are created typeless so the same resource can back both a
-	// depth-stencil view and a shader-resource view.
-	if (props.is_depth) dxgi_format = format_to_dxgi_typeless(desc.format);
-
-	d3d12::ResourceFlags flags = d3d12::RESOURCE_FLAG_NONE;
-	if (desc.usage.color_attachment) flags |= d3d12::RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-	if (desc.usage.depth_stencil_attachment)
-	{
-		flags |= d3d12::RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-		if (!desc.usage.sampled && !desc.usage.input_attachment)
-		{
-			flags |= d3d12::RESOURCE_FLAG_DENY_SHADER_RESOURCE;
-		}
-	}
-	if (desc.usage.storage) flags |= d3d12::RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-
-	d3d12::ResourceDesc resource_desc = {
-		.dimension = dimension,
-		.alignment = 0,
-		.width = desc.width,
-		.height = desc.height,
-		.depth_or_array_size = depth_or_array_size,
-		.mip_levels = (ushort)desc.mip_levels,
-		.format = dxgi_format,
-		.sample_desc = { .count = dx12_sample_count(desc.samples), .quality = 0 },
-		.layout = d3d12::TextureLayout.UNKNOWN,
-		.flags = flags,
-	};
-
-	// Textures always live in device-local memory; D3D12 has no useful
-	// host-visible texture heap, so PREFER_HOST is treated as AUTO.
-	d3d12ma::AllocationDesc alloc_desc = { .heap_type = (int)d3d12::HeapType.DEFAULT };
-	d3d12ma::Allocation allocation;
-	d3d12::Resource* resource;
-	int hr = d3d12ma::create_resource(
-		device.backend.dx12.allocator, &alloc_desc, &resource_desc,
-		(uint)d3d12::RESOURCE_STATE_COMMON, null, &allocation, (void**)&resource);
-	if (dxgi::failed(hr) || !allocation) return OUT_OF_DEVICE_MEMORY~;
-	// The allocation owns the resource; drop the extra reference handed back.
-	if (resource) dxgi::release(resource);
-
-	return {
-		.cookie = next_cookie(),
-		.backend.dx12 = {
-			.allocation = allocation,
-			.resource = (d3d12::Resource*)d3d12ma::allocation_get_resource(allocation),
-			.format = desc.format,
-			.image_type = desc.image_type,
-			.width = desc.width,
-			.height = desc.height,
-			.depth = desc.depth,
-			.mip_levels = desc.mip_levels,
-			.array_layers = desc.array_layers,
-			.sample_count = dx12_sample_count(desc.samples),
-		},
-	};
-}
-
 fn void image_deinit_dx12(Image* img, Device* device)
 {
 	if (img.backend.dx12.allocation) d3d12ma::free_allocation(img.backend.dx12.allocation);
@@ -667,9 +714,9 @@ fn vk::ImageType image_type_vk(ImageType type) @private
 {
 	switch (type)
 	{
-		case D1: return vk::ImageType.D1;
-		case D2: return vk::ImageType.D2;
-		case D3: return vk::ImageType.D3;
+		case D1: return vk::ImageType.TYPE_1D;
+		case D2: return vk::ImageType.TYPE_2D;
+		case D3: return vk::ImageType.TYPE_3D;
 	}
 }
 
@@ -677,13 +724,13 @@ fn vk::SampleCountFlagBits image_samples_vk(ImageSampleCount samples) @private
 {
 	switch (samples)
 	{
-		case S1: return vk::SAMPLE_COUNT_1_BIT;
-		case S2: return vk::SAMPLE_COUNT_2_BIT;
-		case S4: return vk::SAMPLE_COUNT_4_BIT;
-		case S8: return vk::SAMPLE_COUNT_8_BIT;
-		case S16: return vk::SAMPLE_COUNT_16_BIT;
-		case S32: return vk::SAMPLE_COUNT_32_BIT;
-		case S64: return vk::SAMPLE_COUNT_64_BIT;
+		case S1: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_1_BIT;
+		case S2: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_2_BIT;
+		case S4: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_4_BIT;
+		case S8: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_8_BIT;
+		case S16: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_16_BIT;
+		case S32: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_32_BIT;
+		case S64: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_64_BIT;
 	}
 }
 
@@ -697,45 +744,12 @@ fn vma::MemoryUsage image_memory_usage_vk(ImageMemoryUsage usage) @private
 	}
 }
 
-fn Image? image_init_vk(Device* device, ImageDesc desc)
-{
-	if (desc.width == 0 || desc.height == 0 || desc.depth == 0 || desc.mip_levels == 0 || desc.array_layers == 0) {
-		return UNSUPPORTED_FEATURE~;
-	}
-	vk::ImageCreateFlags create_flags;
-	if (desc.flags.cube_compatible) create_flags |= vk::IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-	if (desc.flags.block_texel_view_compatible) create_flags |= vk::IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT;
-	vk::ImageCreateInfo create_info = {
-		.sType = vk::StructureType.IMAGE_CREATE_INFO,
-		.flags = create_flags,
-		.imageType = image_type_vk(desc.image_type),
-		.format = to_vk_format(desc.format),
-		.extent = { .width = desc.width, .height = desc.height, .depth = desc.depth },
-		.mipLevels = desc.mip_levels,
-		.arrayLayers = desc.array_layers,
-		.samples = image_samples_vk(desc.samples),
-		.tiling = desc.tiling == OPTIMAL ? vk::ImageTiling.OPTIMAL : vk::ImageTiling.LINEAR,
-		.usage = image_usage_flags_vk(desc.usage),
-		.sharingMode = vk::SharingMode.EXCLUSIVE,
-		.initialLayout = vk::ImageLayout.UNDEFINED,
-	};
-	vma::AllocationCreateInfo allocation_info = { .usage = image_memory_usage_vk(desc.memory_usage) };
-	vk::Image image;
-	vma::Allocation allocation;
-	vma::AllocationInfo vma_info;
-	vk_check(vma::create_image(device.backend.vk.vma_allocator, &create_info, &allocation_info, &image, &allocation, &vma_info))!;
-	return {
-		.cookie = next_cookie(),
-		.backend.vk = { .image = image, .allocation = allocation, .format = create_info.format, .borrowed = false },
-	};
-}
-
 fn void image_deinit_vk(Image* img, Device* device)
 {
 	if (img.backend.vk.borrowed) return;
 	if (img.backend.vk.allocation != null) {
 		vma::destroy_image(device.backend.vk.vma_allocator, img.backend.vk.image, img.backend.vk.allocation);
-	} else if (img.backend.vk.image != vk::NULL_HANDLE) {
+	} else if (img.backend.vk.image != (vk::Image)0) {
 		device.backend.vk.vtable.destroyImage(device.backend.vk.device, img.backend.vk.image, null);
 	}
 	img.backend.vk = {};
@@ -848,6 +862,6 @@ fn void? image_upload_vk(Image* image, Device* device, ImageUploadOptions option
 	vk_check(device.backend.vk.vtable.endCommandBuffer(cmd))!;
 	vk::CommandBufferSubmitInfo cmd_submit = { .sType = vk::StructureType.COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd };
 	vk::SubmitInfo2 submit = { .sType = vk::StructureType.SUBMIT_INFO_2, .commandBufferInfoCount = 1, .pCommandBufferInfos = &cmd_submit };
-	vk_check(device.backend.vk.vtable.queueSubmit2(device.graphics_queue.backend.vk.queue, 1, &submit, 0))!;
+	vk_check(device.backend.vk.vtable.queueSubmit2(device.graphics_queue.backend.vk.queue, 1, &submit, (vk::Fence)0))!;
 	vk_check(device.backend.vk.vtable.queueWaitIdle(device.graphics_queue.backend.vk.queue))!;
 }

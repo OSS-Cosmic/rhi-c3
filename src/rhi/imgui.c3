@@ -1,10 +1,10 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// Vulkan ImGui renderer. This file is deliberately behind RHI_IMGUI: the
+// ImGui renderer. This file is deliberately behind RHI_IMGUI: the
 // vendor/imgui_c shim is an optional application dependency and must not make
 // the regular RHI (or its other backends) require libimgui.
-module rhi @feat(RHI_IMGUI & RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
+module rhi @feat(RHI_IMGUI & !RHI_HEADLESS & !WASM & ((RHI_VK & (LINUX | WIN32)) | (RHI_MTL & DARWIN)));
 
 import std::core::mem;
 import rhi::alloc;
@@ -22,6 +22,12 @@ const uint IMGUI_BACKEND_FLAGS_RENDERER_HAS_VTX_OFFSET = 1 << 3;
 // build/examples/03_imgui/shaders after `./build.py shaders/examples build`.
 const char[*] IMGUI_VERT_SPV @align(4) = $embed("shaders/imgui.vert.spv");
 const char[*] IMGUI_FRAG_SPV @align(4) = $embed("shaders/imgui.frag.spv");
+
+module rhi @feat(RHI_IMGUI & RHI_MTL & DARWIN & !RHI_HEADLESS);
+const char[*] IMGUI_VERT_MSL = $embed("../../build/examples/03_imgui/shaders/imgui.vert.metal");
+const char[*] IMGUI_FRAG_MSL = $embed("../../build/examples/03_imgui/shaders/imgui.frag.metal");
+
+module rhi @feat(RHI_IMGUI & !RHI_HEADLESS & !WASM & ((RHI_VK & (LINUX | WIN32)) | (RHI_MTL & DARWIN)));
 
 // The C API exposes ImGui's public structs directly. Keep only the fields the
 // renderer reads, with padding that preserves the vendor/imgui_c/imgui 1.93.0 WIP ABI. The offsets
@@ -191,10 +197,8 @@ extern fn void imgui_font_atlas_set_tex_id(void* atlas, ulong id) @cname("ImFont
 
 struct ImguiPushConstants
 {
-
-float[2] scale;
-
-float[2] translate;
+	ImguiVec2 scale;
+	ImguiVec2 translate;
 }
 
 struct ImguiLayer
@@ -203,6 +207,10 @@ struct ImguiLayer
 void* ctx;
 
 Program program;
+
+Shader shader;
+
+Pipeline pipeline;
 
 Image font_image;
 
@@ -239,6 +247,8 @@ if (device != null)
 	if (layer.vertex_buffer.cookie) buffer_deinit(&layer.vertex_buffer, device);
 
 	if (layer.program.shader_bins[0].data.len || layer.program.shader_bins[1].data.len) program_deinit(&layer.program, device);
+	if (layer.pipeline.cookie) pipeline_deinit(&layer.pipeline, device);
+	if (layer.shader.cookie) shader_deinit(&layer.shader, device);
 
 	if (layer.sampler.cookie) sampler_deinit(&layer.sampler, device);
 
@@ -255,7 +265,7 @@ if (layer.ctx) imgui_destroy_context(layer.ctx);
 fn ImguiLayer? imgui_layer_init(Device* device, Format color_format)
 {
 
-if (device == null || renderer.backend != VK) return UNSUPPORTED_BACKEND~;
+	if (device == null || (renderer.backend != VK && renderer.backend != MTL)) return UNSUPPORTED_BACKEND~;
 
 ImguiLayer layer = { .color_format = color_format };
 
@@ -369,31 +379,55 @@ layer.sampler = sampler_init(device, {
 
 })!;
 
-ProgramModuleStage[2] modules = {
-
-{ .stage = VERTEX, .data = IMGUI_VERT_SPV[..], .entry_point = "main" },
-
-{ .stage = FRAGMENT, .data = IMGUI_FRAG_SPV[..], .entry_point = "main" },
-
-};
-
-ProgramLayoutBinding[2] bindings = {
-
-{ .name = "uTexture", .set = 0, .binding = 0, .descriptor_type = SAMPLED_IMAGE, .count = 1, .stages = { .fragment = true } },
-
-{ .name = "uSampler", .set = 0, .binding = 1, .descriptor_type = SAMPLER, .count = 1, .stages = { .fragment = true } },
-
-};
-
-layer.program = program_init(device, modules[..], {
-
-.bindings = bindings[..],
-
-.push_constant = { .stages = { .vertex = true }, .size = 16 },
-
-.has_push_constant = true,
-
-})!;
+if (renderer.backend == VK)
+{
+	ProgramModuleStage[2] modules = {
+		{ .stage = VERTEX, .data = IMGUI_VERT_SPV[..], .entry_point = "main" },
+		{ .stage = FRAGMENT, .data = IMGUI_FRAG_SPV[..], .entry_point = "main" },
+	};
+	ProgramLayoutBinding[2] bindings = {
+		{ .name = "uTexture", .set = 0, .binding = 0, .descriptor_type = SAMPLED_IMAGE, .count = 1, .stages = { .fragment = true } },
+		{ .name = "uSampler", .set = 0, .binding = 1, .descriptor_type = SAMPLER, .count = 1, .stages = { .fragment = true } },
+	};
+	layer.program = program_init(device, modules[..], {
+		.bindings = bindings[..],
+		.push_constant = { .stages = { .vertex = true }, .size = 16 },
+		.has_push_constant = true,
+	})!;
+}
+else
+{
+	$if HAS_MTL:
+	layer.shader = shader_init_graphics(device, {
+		.vertex_stage = { .data = IMGUI_VERT_MSL[..], .entry_point = "vertexMain" },
+		.has_vertex_stage = true,
+		.fragment_stage = { .data = IMGUI_FRAG_MSL[..], .entry_point = "fragmentMain" },
+		.has_fragment_stage = true,
+	})!;
+	VertexAttribute[3] attributes = {
+		{ .location = 0, .format = FLOAT2, .offset = 0 },
+		{ .location = 1, .format = FLOAT2, .offset = 8 },
+		{ .location = 2, .format = UBYTE4_NORM, .offset = 16 },
+	};
+	TextureBinding[1] texture_bindings = {{
+		.name = "uTexture", .binding = 0,
+		.sampler_name = "uSampler", .has_sampler_name = true,
+		.sampler_binding = 0, .has_sampler_binding = true,
+	}};
+	ColorTarget[1] colors = {{ .format = color_format, .blend = BLEND_STATE_STRAIGHT_ALPHA, .has_blend = true }};
+	layer.pipeline = pipeline_init_graphics(device, {
+		.shader = &layer.shader,
+		.colors = colors[..],
+		.vertex_layout = { .stride = IMGUI_DRAW_VERT_STRIDE, .attributes = attributes[..] },
+		.has_vertex_layout = true,
+		.raster = { .topology = TRIANGLE_LIST, .cull_mode = NONE, .front_face = CLOCKWISE },
+		.push_constant_size = 16,
+		.texture_bindings = texture_bindings[..],
+	})!;
+	$else
+	return UNSUPPORTED_BACKEND~;
+	$endif
+}
 
 layer.vertex_buffer = imgui_scratch_buffer_init(device, (usz)IMGUI_INIT_VERTEX_CAPACITY * IMGUI_DRAW_VERT_STRIDE, { .vertex_buffer = true })!;
 
@@ -483,7 +517,7 @@ request = segment.alloc(frame_index, (usz)count);
 return request;
 }
 
-fn void imgui_layer_new_frame(ImguiLayer* layer, float display_width, float display_height, float dt)
+fn void imgui_layer_new_frame(ImguiLayer* layer, float display_width, float display_height, float dt, float framebuffer_scale_x = 1, float framebuffer_scale_y = 1)
 {
 
 if (layer == null || layer.ctx == null) return;
@@ -496,7 +530,7 @@ if (io == null) return;
 
 io.display_size = { .x = display_width, .y = display_height };
 
-io.display_framebuffer_scale = { .x = 1, .y = 1 };
+io.display_framebuffer_scale = { .x = framebuffer_scale_x, .y = framebuffer_scale_y };
 
 io.delta_time = dt > 0 ? dt : 1.0 / 60.0;
 
@@ -614,7 +648,9 @@ ProgramVertexAttribute[3] attributes = {
 
 };
 
-program_bind_pipeline(&layer.program, device, cmd, IMGUI_PIPELINE_KEY, {
+if (renderer.backend == VK)
+{
+	program_bind_pipeline(&layer.program, device, cmd, IMGUI_PIPELINE_KEY, {
 
 .topology = TRIANGLE_LIST,
 
@@ -631,20 +667,32 @@ program_bind_pipeline(&layer.program, device, cmd, IMGUI_PIPELINE_KEY, {
 .vertex_attributes = attributes[..],
 
 })!;
+}
+else { cmd_bind_pipeline(cmd, device, &layer.pipeline); }
 
 float inv_width = 2.0f / draw_data.display_size.x;
 
 float inv_height = 2.0f / draw_data.display_size.y;
 
+float scale_y = inv_height;
+float translate_y = -1.0f - draw_data.display_pos.y * inv_height;
+if (renderer.backend == MTL)
+{
+	// Metal's NDC y axis points up while ImGui's display coordinates point down.
+	scale_y = -inv_height;
+	translate_y = 1.0f + draw_data.display_pos.y * inv_height;
+}
+
 ImguiPushConstants push_constants = {
 
-.scale = { inv_width, inv_height },
+.scale = { .x = inv_width, .y = scale_y },
 
-.translate = { -1.0f - draw_data.display_pos.x * inv_width, -1.0f - draw_data.display_pos.y * inv_height },
+.translate = { .x = -1.0f - draw_data.display_pos.x * inv_width, .y = translate_y },
 
 };
 
-program_push_constants(&layer.program, device, cmd, ((char*)&push_constants)[:16], 0);
+if (renderer.backend == VK) { program_push_constants(&layer.program, device, cmd, ((char*)&push_constants)[:16], 0); }
+else { cmd_set_push_constants(cmd, device, &layer.pipeline, ((char*)&push_constants)[:16]); }
 
 cmd_set_viewport(cmd, device, { .width = fb_width, .height = fb_height, .min_depth = 0, .max_depth = 1 });
 
@@ -660,7 +708,8 @@ descriptor_binding("uSampler", layer.sampler_descriptor, 0),
 
 };
 
-program_bind_descriptors(&layer.program, device, cmd, (uint)render_frame, descriptors[..], GRAPHICS)!;
+if (renderer.backend == VK) { program_bind_descriptors(&layer.program, device, cmd, (uint)render_frame, descriptors[..], GRAPHICS)!; }
+else { cmd_bind_descriptors(cmd, device, &layer.pipeline, descriptors[..])!; }
 
 uint global_vertex = vtx_request.element_offset;
 

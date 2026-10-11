@@ -17,17 +17,6 @@ import rhi;
 
 const int FRAMES_IN_FLIGHT = 3;
 
-// Keep the SPIR-V blobs aligned: Vulkan consumes their bytes as uint words.
-const char[*] FULLSCREEN_VERT_SPV @align(4) = $embed("../../build/examples/01_shader/shaders/fullscreen.vert.spv");
-const char[*] MANDELBROT_FRAG_SPV @align(4) = $embed("../../build/examples/01_shader/shaders/mandelbrot.frag.spv");
-
-const char[*] FULLSCREEN_VERT_MSL = $embed("../../build/examples/01_shader/shaders/fullscreen.vert.metal");
-const char[*] MANDELBROT_FRAG_MSL = $embed("../../build/examples/01_shader/shaders/mandelbrot.frag.metal");
-const char[*] FULLSCREEN_VERT_WGSL = $embed("../../build/examples/01_shader/shaders/fullscreen.vert.wgsl");
-const char[*] MANDELBROT_FRAG_WGSL = $embed("../../build/examples/01_shader/shaders/mandelbrot.frag.wgsl");
-const char[*] FULLSCREEN_VERT_GLSL = $embed("../../build/examples/01_shader/shaders/fullscreen.vert.glsl");
-const char[*] MANDELBROT_FRAG_GLSL = $embed("../../build/examples/01_shader/shaders/mandelbrot.frag.glsl");
-
 enum ShaderStage : char
 {
 	NONE,
@@ -165,46 +154,6 @@ fn void? shader_init(platform::Window window)
 	state.presented = 0;
 }
 
-fn rhi::ShaderGraphicsOptions shader_stages()
-{
-	if (rhi::renderer.backend == rhi::Backend.MTL)
-	{
-		return {
-			.vertex_stage = { .data = FULLSCREEN_VERT_MSL[..], .entry_point = "vertexMain" },
-			.has_vertex_stage = true,
-			.fragment_stage = { .data = MANDELBROT_FRAG_MSL[..], .entry_point = "fragmentMain" },
-			.has_fragment_stage = true,
-		};
-	}
-	if (rhi::renderer.backend == rhi::Backend.WGPU)
-	{
-		return {
-			.vertex_stage = { .data = FULLSCREEN_VERT_WGSL[..], .entry_point = "vertexMain" },
-			.has_vertex_stage = true,
-			.fragment_stage = { .data = MANDELBROT_FRAG_WGSL[..], .entry_point = "fragmentMain" },
-			.has_fragment_stage = true,
-		};
-	}
-	if (rhi::renderer.backend == rhi::Backend.WEBGL)
-	{
-		return {
-			.vertex_stage = { .data = FULLSCREEN_VERT_GLSL[..], .entry_point = "main" },
-			.has_vertex_stage = true,
-			.fragment_stage = { .data = MANDELBROT_FRAG_GLSL[..], .entry_point = "main" },
-			.has_fragment_stage = true,
-		};
-	}
-
-	// The native non-Metal target is Vulkan.  Slang renames both SPIR-V entry
-	// points to main, which is the entry name required by the Vulkan backend.
-	return {
-		.vertex_stage = { .data = FULLSCREEN_VERT_SPV[..], .entry_point = "main" },
-		.has_vertex_stage = true,
-		.fragment_stage = { .data = MANDELBROT_FRAG_SPV[..], .entry_point = "main" },
-		.has_fragment_stage = true,
-	};
-}
-
 fn void? shader_pipeline_init(rhi::Format format)
 {
 	rhi::Pipeline? pipeline = rhi::pipeline_init_graphics(&state.device, {
@@ -300,10 +249,10 @@ fn void? shader_frame()
 			.store_op = rhi::StoreOp.STORE,
 			.clear_color = { 0, 0, 0, 1 },
 		}},
-		.render_area = { .width = width, .height = height },
+		.render_area = { .width = (float)width, .height = (float)height },
 	});
 	rhi::cmd_set_viewport(cmd, &state.device, { .width = (float)width, .height = (float)height, .min_depth = 0, .max_depth = 1 });
-	rhi::cmd_set_scissor(cmd, &state.device, { .width = width, .height = height });
+	rhi::cmd_set_scissor(cmd, &state.device, { .width = (float)width, .height = (float)height });
 	rhi::cmd_bind_pipeline(cmd, &state.device, &state.pipeline);
 	rhi::cmd_draw(cmd, &state.device, 3);
 	rhi::cmd_end_rendering(cmd, &state.device);
@@ -379,4 +328,57 @@ fn void main(String[] args)
 fn void shader_web_start(String[] args) @feat(WASM) @export("_start")
 {
 	platform::run(shader_app(), args);
+}
+
+module example_01_shader @feat(RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
+import rhi;
+const char[*] FULLSCREEN_VERT_SPV @align(4) = $embed("../../build/examples/01_shader/shaders/fullscreen.vert.spv");
+const char[*] MANDELBROT_FRAG_SPV @align(4) = $embed("../../build/examples/01_shader/shaders/mandelbrot.frag.spv");
+fn ShaderGraphicsOptions shader_stages()
+{
+	return {
+		.vertex_stage = { .data = FULLSCREEN_VERT_SPV[..], .entry_point = "main" },
+		.has_vertex_stage = true,
+		.fragment_stage = { .data = MANDELBROT_FRAG_SPV[..], .entry_point = "main" },
+		.has_fragment_stage = true,
+	};
+}
+
+module example_01_shader @feat(RHI_MTL & DARWIN & !RHI_HEADLESS);
+import rhi;
+const char[*] FULLSCREEN_VERT_MSL = $embed("../../build/examples/01_shader/shaders/fullscreen.vert.metal");
+const char[*] MANDELBROT_FRAG_MSL = $embed("../../build/examples/01_shader/shaders/mandelbrot.frag.metal");
+fn ShaderGraphicsOptions shader_stages()
+{
+	return {
+		.vertex_stage = { .data = FULLSCREEN_VERT_MSL[..], .entry_point = "vertexMain" },
+		.has_vertex_stage = true,
+		.fragment_stage = { .data = MANDELBROT_FRAG_MSL[..], .entry_point = "fragmentMain" },
+		.has_fragment_stage = true,
+	};
+}
+
+module example_01_shader @feat(RHI_WGPU & RHI_WEBGL & !RHI_HEADLESS & WASM);
+import rhi;
+const char[*] FULLSCREEN_VERT_WGSL = $embed("../../build/examples/01_shader/shaders/fullscreen.vert.wgsl");
+const char[*] MANDELBROT_FRAG_WGSL = $embed("../../build/examples/01_shader/shaders/mandelbrot.frag.wgsl");
+const char[*] FULLSCREEN_VERT_GLSL = $embed("../../build/examples/01_shader/shaders/fullscreen.vert.glsl");
+const char[*] MANDELBROT_FRAG_GLSL = $embed("../../build/examples/01_shader/shaders/mandelbrot.frag.glsl");
+fn ShaderGraphicsOptions shader_stages()
+{
+	if (rhi::renderer.backend == rhi::Backend.WGPU)
+	{
+		return {
+			.vertex_stage = { .data = FULLSCREEN_VERT_WGSL[..], .entry_point = "vertexMain" },
+			.has_vertex_stage = true,
+			.fragment_stage = { .data = MANDELBROT_FRAG_WGSL[..], .entry_point = "fragmentMain" },
+			.has_fragment_stage = true,
+		};
+	}
+	return {
+		.vertex_stage = { .data = FULLSCREEN_VERT_GLSL[..], .entry_point = "main" },
+		.has_vertex_stage = true,
+		.fragment_stage = { .data = MANDELBROT_FRAG_GLSL[..], .entry_point = "main" },
+		.has_fragment_stage = true,
+	};
 }

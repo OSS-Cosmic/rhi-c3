@@ -49,7 +49,7 @@ fn Device? device_init(PhysicalAdapter* adapter, Allocator allocator = mem)
 				return device_init_webgl(adapter, allocator);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void device_deinit(Device* d)
@@ -407,40 +407,40 @@ fn Device? device_init_vk(PhysicalAdapter* adapter, alloc::Allocator allocator =
 	vk::PhysicalDeviceVulkan13Features features13 = { .sType = PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
 	if (renderer.vk.api_version >= vk::API_VERSION_1_3) vk_add_next(&features, &features13);
 
-	vk::PhysicalDeviceMaintenance5FeaturesKHR maintenance_5_features = { .sType = PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR };
+	vk::PhysicalDeviceMaintenance5FeaturesKHR maintenance_5_features = { .sType = vk::PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES_KHR };
 	if (has_maintenance_5) vk_add_next(&features, &maintenance_5_features);
 
-	vk::PhysicalDevicePresentIdFeaturesKHR present_id_features = { .sType = PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR };
+	vk::PhysicalDevicePresentIdFeaturesKHR present_id_features = { .sType = vk::PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR };
 	if (device_has_extension(enabled_extension_names.array_view(), vk::KHR_PRESENT_ID_EXTENSION_NAME))
 	{
 		vk_add_next(&features, &present_id_features);
 	}
 
-	vk::PhysicalDevicePresentWaitFeaturesKHR present_wait_features = { .sType = PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR };
+	vk::PhysicalDevicePresentWaitFeaturesKHR present_wait_features = { .sType = vk::PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR };
 	if (device_has_extension(enabled_extension_names.array_view(), vk::KHR_PRESENT_WAIT_EXTENSION_NAME))
 	{
 		vk_add_next(&features, &present_wait_features);
 	}
 
-	vk::PhysicalDeviceLineRasterizationFeaturesKHR line_rasterization_features = { .sType = PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES_KHR };
+	vk::PhysicalDeviceLineRasterizationFeaturesKHR line_rasterization_features = { .sType = vk::PHYSICAL_DEVICE_LINE_RASTERIZATION_FEATURES_KHR };
 	if (device_has_extension(enabled_extension_names.array_view(), vk::KHR_LINE_RASTERIZATION_EXTENSION_NAME))
 	{
 		vk_add_next(&features, &line_rasterization_features);
 	}
 
-	vk::PhysicalDeviceAccelerationStructureFeaturesKHR accel_structure_features = { .sType = PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
+	vk::PhysicalDeviceAccelerationStructureFeaturesKHR accel_structure_features = { .sType = vk::PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
 	if (device_has_extension(enabled_extension_names.array_view(), vk::KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME))
 	{
 		vk_add_next(&features, &accel_structure_features);
 	}
 
-	vk::PhysicalDeviceRayTracingPipelineFeaturesKHR ray_tracing_pipeline_features = { .sType = PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR };
+	vk::PhysicalDeviceRayTracingPipelineFeaturesKHR ray_tracing_pipeline_features = { .sType = vk::PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR };
 	if (device_has_extension(enabled_extension_names.array_view(), vk::KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME))
 	{
 		vk_add_next(&features, &ray_tracing_pipeline_features);
 	}
 
-	vk::PhysicalDeviceRayQueryFeaturesKHR ray_query_features = { .sType = PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
+	vk::PhysicalDeviceRayQueryFeaturesKHR ray_query_features = { .sType = vk::PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
 	if (device_has_extension(enabled_extension_names.array_view(), vk::KHR_RAY_QUERY_EXTENSION_NAME))
 	{
 		vk_add_next(&features, &ray_query_features);
@@ -454,7 +454,7 @@ fn Device? device_init_vk(PhysicalAdapter* adapter, alloc::Allocator allocator =
 		.queueCreateInfoCount = (uint)device_queue_create_info.len(),
 		.pQueueCreateInfos = &device_queue_create_info[0],
 		.enabledExtensionCount = (uint)enabled_extension_names.len(),
-		.ppEnabledExtensionNames = enabled_extension_names.len() ? &enabled_extension_names[0] : null,
+		.ppEnabledExtensionNames = enabled_extension_names.len() ? (ZString)&enabled_extension_names[0] : null,
 	};
 
 	vk::Device vk_device;
@@ -467,7 +467,7 @@ fn Device? device_init_vk(PhysicalAdapter* adapter, alloc::Allocator allocator =
 	{
 		if (!has_rhi_queue[i]) continue;
 		QueueVk* q = &rhi_queues[i].backend.vk;
-		if (q.queue == null) vtable.getDeviceQueue(vk_device, q.family_index, q.slot_index, &q.queue);
+		if (q.queue == (vk::Queue)0) vtable.getDeviceQueue(vk_device, q.family_index, q.slot_index, &q.queue);
 	}
 
 	vma::VulkanFunctions vulkan_functions = {
@@ -495,6 +495,7 @@ fn Device? device_init_vk(PhysicalAdapter* adapter, alloc::Allocator allocator =
 		.bind_buffer_memory2_khr = vtable.bindBufferMemory2KHR,
 		.bind_image_memory2_khr = vtable.bindImageMemory2KHR,
 		.get_physical_device_memory_properties2_khr = vk::getPhysicalDeviceMemoryProperties2KHR,
+		.get_physical_device_properties2_khr = vk::getPhysicalDeviceProperties2KHR,
 		.get_device_buffer_memory_requirements = vtable.getDeviceBufferMemoryRequirements,
 		.get_device_image_memory_requirements = vtable.getDeviceImageMemoryRequirements,
 	};

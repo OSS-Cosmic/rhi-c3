@@ -23,7 +23,7 @@ and `RHI_HEADLESS` is off. See `HAS_*` consts in `src/rhi/rhi.c3`.
 ```text
 src/rhi/        backend-neutral front + per-backend code (vk_*, mtl_*, dx12_*, webgpu, webgl)
 src/vendor/     bindings: vulkan, vma, metal, sdl3, imgui
-vendor/         native sources: vma, d3d12ma, imgui_c (+ imgui submodule)
+vendor/         native sources: VulkanMemoryAllocator, d3d12ma, imgui_c (+ imgui submodule)
 examples/       00_clear .. 05_texture, shared platform harness, slang shaders
 test/           c3 @test functions, mirror src/
 tools/          build helpers (meson drives these)
@@ -36,7 +36,8 @@ Common:
 - C3 0.8 (`c3c`, tested with 0.8.4) on `PATH`, or set `$C3C`.
 - Meson >= 1.1, Python 3, C and C++17 compilers, `ar`.
 - volk submodule (Vulkan loader): `git submodule update --init vendor/volk`
-- SDL3 dev library (links as `-lSDL3`) for native windows.
+- C3 0.8's SDL3 vendor package for native examples and tests:
+  `c3c vendor-fetch sdl3`.
 - Dear ImGui submodule, for `03_imgui` and `04_svt`:
   `git submodule update --init vendor/imgui_c/imgui`
 - `slangc` and `spirv-cross` for shaders. Set `SLANGC` / `SPIRV_CROSS` (or `-Dslangc=` /
@@ -46,6 +47,7 @@ Per backend:
 
 - **Vulkan**: Vulkan loader/driver at runtime, Vulkan headers to build VMA and volk.
   volk opens the loader at run time, nothing links libvulkan.
+  Initialize VMA with `git submodule update --init vendor/VulkanMemoryAllocator`.
 - **Metal**: macOS arm64, Xcode toolchain. Links `Metal`, `Foundation`,
   `QuartzCore` frameworks and the Objective-C runtime.
 - **D3D12**: Windows 10+ with a D3D12 device. Cross-building from Linux needs
@@ -58,7 +60,7 @@ Meson builds the C++ archives that c3c links. Build dir must not be `build/`
 
 ```sh
 meson setup build-meson
-meson compile -C build-meson     # vendor/vma/lib/libvma.a, vendor/imgui_c/lib/libimgui.a
+meson compile -C build-meson     # vendor/lib/libvma.a, vendor/imgui_c/lib/libimgui.a
 ```
 
 D3D12MemAlloc is opt-in and not built by default:
@@ -134,12 +136,11 @@ pipeline yet.
 ## Tests
 
 ```sh
-meson test -C build-meson     # runs `c3c test -z -lSDL3` on host
-c3c test -z -lSDL3            # directly, after vendor libs are built
+meson test -C build-meson     # runs c3c test on host
+c3c test                      # directly, after vendor packages/libraries are available
 ```
 
-SDL3 must be linkable. Runtime-only Linux installs may need the `libSDL3.so`
-dev symlink; `tools/sdl3_link_flags.py` adds a local shim when it can.
+The `sdl3` vendor package supplies the platform SDL3 archive and linker metadata.
 
 ## Examples
 
@@ -179,7 +180,8 @@ together. Vendor archives must exist first (see above).
 
 ```sh
 c3c compile examples/00_clear/main.c3 examples/platform/platform.c3 'src/**' \
-    -L vendor/vma/lib -L vendor/imgui_c/lib -l vma -l imgui -l stdc++ -l SDL3 \
+    --libdir . --lib sdl3 \
+    -L vendor/lib -L vendor/imgui_c/lib -l vma -l imgui -l stdc++ \
     -o build/examples/00_clear/00_clear
 
 ./build/examples/00_clear/00_clear --frames 120

@@ -97,7 +97,7 @@ fn QueryPool? query_pool_init(Device* device, QueryPoolDesc desc)
 		case WEBGL:
 			break;
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void query_pool_deinit(QueryPool* p, Device* device)
@@ -219,7 +219,7 @@ fn QueryPool? query_pool_init_vk(Device* device, QueryPoolDesc desc)
 
 fn void query_pool_deinit_vk(QueryPool* p, Device* device)
 {
-	if (p.backend.vk.pool != vk::NULL_HANDLE)
+	if (p.backend.vk.pool != (vk::QueryPool)0)
 	{
 		device.backend.vk.vtable.destroyQueryPool(device.backend.vk.device, p.backend.vk.pool, null);
 	}

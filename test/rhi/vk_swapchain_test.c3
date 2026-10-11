@@ -6,7 +6,7 @@ module rhi @feat(RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
 import std::atomic;
 import std::collections::list;
 import std::core::test;
-import sdl3;
+import sdl3_compat;
 import vk;
 
 const uint VK_SWAPCHAIN_TEST_FRAMES_IN_FLIGHT = 3;
@@ -206,14 +206,14 @@ fn bool vk_swapchain_test_run(WindowHandle window)
 
 fn void vk_swapchain_present_test() @test
 {
-	if (!sdl3::init(sdl3::SDL_INIT_VIDEO))
+	if (!sdl3_compat::init(sdl3_compat::SDL_INIT_VIDEO))
 	{
-		log::info("Vulkan swapchain test skipped: SDL_Init failed: %s", sdl3::get_error());
+		log::info("Vulkan swapchain test skipped: SDL_Init failed: %s", sdl3_compat::get_error());
 		return;
 	}
-	defer sdl3::quit();
+	defer sdl3_compat::quit();
 
-	ZString driver_name = sdl3::get_current_video_driver();
+	ZString driver_name = sdl3_compat::get_current_video_driver();
 	if (!driver_name)
 	{
 		log::info("Vulkan swapchain test skipped: SDL did not select a video driver");
@@ -226,22 +226,22 @@ fn void vk_swapchain_present_test() @test
 		return;
 	}
 
-	sdl3::Window sdl_window = sdl3::create_window(
+	sdl3_compat::Window sdl_window = sdl3_compat::create_window(
 		"rhi Vulkan swapchain", 64, 64,
-		sdl3::SDL_WINDOW_HIDDEN | sdl3::SDL_WINDOW_VULKAN);
+		sdl3_compat::SDL_WINDOW_HIDDEN | sdl3_compat::SDL_WINDOW_VULKAN);
 	if (!sdl_window)
 	{
-		log::info("Vulkan swapchain test skipped: SDL_CreateWindow failed: %s", sdl3::get_error());
+		log::info("Vulkan swapchain test skipped: SDL_CreateWindow failed: %s", sdl3_compat::get_error());
 		return;
 	}
-	defer sdl3::destroy_window(sdl_window);
+	defer sdl3_compat::destroy_window(sdl_window);
 
-	sdl3::Properties props = sdl3::get_window_properties(sdl_window);
+	sdl3_compat::Properties props = sdl3_compat::get_window_properties(sdl_window);
 	WindowHandle window = {};
 	if (driver == "x11")
 	{
-		void* display = sdl3::get_pointer_property(props, sdl3::SDL_PROP_WINDOW_X11_DISPLAY_POINTER, null);
-		ulong x11_window = (ulong)sdl3::get_number_property(props, sdl3::SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
+		void* display = sdl3_compat::get_pointer_property(props, sdl3_compat::SDL_PROP_WINDOW_X11_DISPLAY_POINTER, null);
+		ulong x11_window = (ulong)sdl3_compat::get_number_property(props, sdl3_compat::SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0);
 		if (!display || x11_window == 0)
 		{
 			log::info("Vulkan swapchain test skipped: SDL X11 window properties unavailable");
@@ -251,8 +251,8 @@ fn void vk_swapchain_present_test() @test
 	}
 	else
 	{
-		void* display = sdl3::get_pointer_property(props, sdl3::SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, null);
-		void* surface = sdl3::get_pointer_property(props, sdl3::SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, null);
+		void* display = sdl3_compat::get_pointer_property(props, sdl3_compat::SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, null);
+		void* surface = sdl3_compat::get_pointer_property(props, sdl3_compat::SDL_PROP_WINDOW_WAYLAND_SURFACE_POINTER, null);
 		if (!display || !surface)
 		{
 			log::info("Vulkan swapchain test skipped: SDL Wayland window properties unavailable");
@@ -275,7 +275,7 @@ fn void vk_swapchain_present_test() @test
 	if (vk::createDebugUtilsMessengerEXT)
 	{
 		vk::DebugUtilsMessengerCreateInfoEXT info = {
-			.sType = vk::StructureType.DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+			.sType = vk::StructureType.vk::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
 			.pfnUserCallback = &vk_swapchain_test_messenger_callback,
 			.pUserData = &validation,
 			.messageSeverity = vk::DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | vk::DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,

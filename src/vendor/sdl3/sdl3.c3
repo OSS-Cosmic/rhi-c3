@@ -3,9 +3,9 @@
 
 // This binding is intentionally minimal. The examples and platform support
 // will grow it as they need more of SDL3.
-// Public names intentionally stay SDL-shaped (`sdl3::init`,
-// `sdl3::create_window`, and so on) as that surface grows.
-module sdl3 @feat(DARWIN | LINUX | WIN32) @link(env::DARWIN | env::LINUX | env::WIN32, "SDL3");
+// Public names intentionally stay SDL-shaped (`sdl3_compat::init`,
+// `sdl3_compat::create_window`, and so on) as that surface grows.
+module sdl3_compat @feat(DARWIN | LINUX | WIN32) @link(env::LINUX | env::WIN32, "SDL3");
 
 typedef Window @constinit = inline void*;
 typedef Properties @constinit = uint;
@@ -44,6 +44,7 @@ struct MouseMotionEvent
 	ulong timestamp;
 	uint window_id;
 	uint mouse_id;
+	uint state;
 	float x;
 	float y;
 	float xrel;
@@ -158,6 +159,9 @@ extern fn void destroy_window(Window window) @cname("SDL_DestroyWindow");
 extern fn bool poll_event(Event* event) @cname("SDL_PollEvent");
 extern fn bool set_window_relative_mouse_mode(Window window, bool enabled) @cname("SDL_SetWindowRelativeMouseMode");
 extern fn bool get_window_size_in_pixels(Window window, int* width, int* height) @cname("SDL_GetWindowSizeInPixels");
+extern fn bool get_window_size(Window window, int* width, int* height) @cname("SDL_GetWindowSize");
+extern fn bool start_text_input(Window window) @cname("SDL_StartTextInput");
+extern fn bool stop_text_input(Window window) @cname("SDL_StopTextInput");
 extern fn ulong get_performance_counter() @cname("SDL_GetPerformanceCounter");
 extern fn ulong get_performance_frequency() @cname("SDL_GetPerformanceFrequency");
 extern fn ulong get_ticks() @cname("SDL_GetTicks");

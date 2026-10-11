@@ -128,120 +128,6 @@ fn vk::ImageAspectFlags vk_image_aspect_from_vk_format(vk::Format f, bool includ
 	}
 }
 
-struct VkFormatMapping
-{
-	Format rhi;
-	vk::Format vk;
-}
-
-const VkFormatMapping[*] VK_FORMAT_MAPPINGS = {
-	{ .rhi = Format.UNKNOWN, .vk = vk::Format.UNDEFINED },
-	{ .rhi = Format.D16_UNORM_S8_UINT, .vk = vk::Format.D16_UNORM_S8_UINT },
-	{ .rhi = Format.D24_UNORM_S8_UINT, .vk = vk::Format.D24_UNORM_S8_UINT },
-	{ .rhi = Format.D32_SFLOAT_S8_UINT, .vk = vk::Format.D32_SFLOAT_S8_UINT },
-	{ .rhi = Format.R8_UNORM, .vk = vk::Format.R8_UNORM },
-	{ .rhi = Format.R8_SNORM, .vk = vk::Format.R8_SNORM },
-	{ .rhi = Format.R8_UINT, .vk = vk::Format.R8_UINT },
-	{ .rhi = Format.R8_SINT, .vk = vk::Format.R8_SINT },
-	{ .rhi = Format.RG8_UNORM, .vk = vk::Format.R8G8_UNORM },
-	{ .rhi = Format.RG8_SNORM, .vk = vk::Format.R8G8_SNORM },
-	{ .rhi = Format.RG8_UINT, .vk = vk::Format.R8G8_UINT },
-	{ .rhi = Format.RG8_SINT, .vk = vk::Format.R8G8_SINT },
-	{ .rhi = Format.BGRA8_UNORM, .vk = vk::Format.B8G8R8A8_UNORM },
-	{ .rhi = Format.BGRA8_SRGB, .vk = vk::Format.B8G8R8A8_SRGB },
-	{ .rhi = Format.BGR8_UNORM, .vk = vk::Format.B8G8R8_UNORM },
-	{ .rhi = Format.RGB8_UNORM, .vk = vk::Format.R8G8B8_UNORM },
-	{ .rhi = Format.RGBA8_UNORM, .vk = vk::Format.R8G8B8A8_UNORM },
-	{ .rhi = Format.RGBA8_SNORM, .vk = vk::Format.R8G8B8A8_SNORM },
-	{ .rhi = Format.RGBA8_UINT, .vk = vk::Format.R8G8B8A8_UINT },
-	{ .rhi = Format.RGBA8_SINT, .vk = vk::Format.R8G8B8A8_SINT },
-	{ .rhi = Format.RGBA8_SRGB, .vk = vk::Format.R8G8B8A8_SRGB },
-	{ .rhi = Format.R16_UNORM, .vk = vk::Format.R16_UNORM },
-	{ .rhi = Format.R16_SNORM, .vk = vk::Format.R16_SNORM },
-	{ .rhi = Format.R16_UINT, .vk = vk::Format.R16_UINT },
-	{ .rhi = Format.R16_SINT, .vk = vk::Format.R16_SINT },
-	{ .rhi = Format.R16_SFLOAT, .vk = vk::Format.R16_SFLOAT },
-	{ .rhi = Format.RG16_UNORM, .vk = vk::Format.R16G16_UNORM },
-	{ .rhi = Format.RG16_SNORM, .vk = vk::Format.R16G16_SNORM },
-	{ .rhi = Format.RG16_UINT, .vk = vk::Format.R16G16_UINT },
-	{ .rhi = Format.RG16_SINT, .vk = vk::Format.R16G16_SINT },
-	{ .rhi = Format.RG16_SFLOAT, .vk = vk::Format.R16G16_SFLOAT },
-	{ .rhi = Format.RGBA16_UNORM, .vk = vk::Format.R16G16B16A16_UNORM },
-	{ .rhi = Format.RGBA16_SNORM, .vk = vk::Format.R16G16B16A16_SNORM },
-	{ .rhi = Format.RGBA16_UINT, .vk = vk::Format.R16G16B16A16_UINT },
-	{ .rhi = Format.RGBA16_SINT, .vk = vk::Format.R16G16B16A16_SINT },
-	{ .rhi = Format.RGBA16_SFLOAT, .vk = vk::Format.R16G16B16A16_SFLOAT },
-	{ .rhi = Format.R32_UINT, .vk = vk::Format.R32_UINT },
-	{ .rhi = Format.R32_SINT, .vk = vk::Format.R32_SINT },
-	{ .rhi = Format.R32_SFLOAT, .vk = vk::Format.R32_SFLOAT },
-	{ .rhi = Format.RG32_UINT, .vk = vk::Format.R32G32_UINT },
-	{ .rhi = Format.RG32_SINT, .vk = vk::Format.R32G32_SINT },
-	{ .rhi = Format.RG32_SFLOAT, .vk = vk::Format.R32G32_SFLOAT },
-	{ .rhi = Format.RGB32_UINT, .vk = vk::Format.R32G32B32_UINT },
-	{ .rhi = Format.RGB32_SINT, .vk = vk::Format.R32G32B32_SINT },
-	{ .rhi = Format.RGB32_SFLOAT, .vk = vk::Format.R32G32B32_SFLOAT },
-	{ .rhi = Format.RGBA32_UINT, .vk = vk::Format.R32G32B32A32_UINT },
-	{ .rhi = Format.RGBA32_SINT, .vk = vk::Format.R32G32B32A32_SINT },
-	{ .rhi = Format.RGBA32_SFLOAT, .vk = vk::Format.R32G32B32A32_SFLOAT },
-	{ .rhi = Format.R10_G10_B10_A2_UNORM, .vk = vk::Format.A2B10G10R10_UNORM_PACK32 },
-	{ .rhi = Format.R10_G10_B10_A2_UINT, .vk = vk::Format.A2B10G10R10_UINT_PACK32 },
-	{ .rhi = Format.R11_G11_B10_UFLOAT, .vk = vk::Format.B10G11R11_UFLOAT_PACK32 },
-	{ .rhi = Format.R9_G9_B9_E5_UNORM, .vk = vk::Format.E5B9G9R9_UFLOAT_PACK32 },
-	{ .rhi = Format.R5_G6_B5_UNORM, .vk = vk::Format.R5G6B5_UNORM_PACK16 },
-	{ .rhi = Format.R5_G5_B5_A1_UNORM, .vk = vk::Format.A1R5G5B5_UNORM_PACK16 },
-	{ .rhi = Format.R4_G4_B4_A4_UNORM, .vk = vk::Format.A4R4G4B4_UNORM_PACK16 },
-	{ .rhi = Format.BC1_RGBA_UNORM, .vk = vk::Format.BC1_RGBA_UNORM_BLOCK },
-	{ .rhi = Format.BC1_RGBA_SRGB, .vk = vk::Format.BC1_RGBA_SRGB_BLOCK },
-	{ .rhi = Format.BC2_RGBA_UNORM, .vk = vk::Format.BC2_UNORM_BLOCK },
-	{ .rhi = Format.BC2_RGBA_SRGB, .vk = vk::Format.BC2_SRGB_BLOCK },
-	{ .rhi = Format.BC3_RGBA_UNORM, .vk = vk::Format.BC3_UNORM_BLOCK },
-	{ .rhi = Format.BC3_RGBA_SRGB, .vk = vk::Format.BC3_SRGB_BLOCK },
-	{ .rhi = Format.BC4_R_UNORM, .vk = vk::Format.BC4_UNORM_BLOCK },
-	{ .rhi = Format.BC4_R_SNORM, .vk = vk::Format.BC4_SNORM_BLOCK },
-	{ .rhi = Format.BC5_RG_UNORM, .vk = vk::Format.BC5_UNORM_BLOCK },
-	{ .rhi = Format.BC5_RG_SNORM, .vk = vk::Format.BC5_SNORM_BLOCK },
-	{ .rhi = Format.BC6H_RGB_UFLOAT, .vk = vk::Format.BC6H_UFLOAT_BLOCK },
-	{ .rhi = Format.BC6H_RGB_SFLOAT, .vk = vk::Format.BC6H_SFLOAT_BLOCK },
-	{ .rhi = Format.BC7_RGBA_UNORM, .vk = vk::Format.BC7_UNORM_BLOCK },
-	{ .rhi = Format.BC7_RGBA_SRGB, .vk = vk::Format.BC7_SRGB_BLOCK },
-	{ .rhi = Format.D16_UNORM, .vk = vk::Format.D16_UNORM },
-	{ .rhi = Format.D32_SFLOAT, .vk = vk::Format.D32_SFLOAT },
-	{ .rhi = Format.D32_SFLOAT_S8_UINT_X24, .vk = vk::Format.D32_SFLOAT_S8_UINT },
-	{ .rhi = Format.R24_UNORM_X8, .vk = vk::Format.D24_UNORM_S8_UINT },
-	{ .rhi = Format.X24_R8_UINT, .vk = vk::Format.D24_UNORM_S8_UINT },
-	{ .rhi = Format.X32_R8_UINT_X24, .vk = vk::Format.D32_SFLOAT_S8_UINT },
-	{ .rhi = Format.R32_SFLOAT_X8_X24, .vk = vk::Format.D32_SFLOAT_S8_UINT },
-	{ .rhi = Format.ETC2_R8G8B8_UNORM, .vk = vk::Format.ETC2_R8G8B8_UNORM_BLOCK }, // Canonical for this block type normally
-	{ .rhi = Format.ETC1_R8G8B8_OES, .vk = vk::Format.ETC2_R8G8B8_UNORM_BLOCK }, // Alias
-	{ .rhi = Format.ETC2_R8G8B8_SRGB, .vk = vk::Format.ETC2_R8G8B8_SRGB_BLOCK },
-	{ .rhi = Format.ETC2_R8G8B8A1_UNORM, .vk = vk::Format.ETC2_R8G8B8A1_UNORM_BLOCK },
-	{ .rhi = Format.ETC2_R8G8B8A1_SRGB, .vk = vk::Format.ETC2_R8G8B8A1_SRGB_BLOCK },
-	{ .rhi = Format.ETC2_R8G8B8A8_UNORM, .vk = vk::Format.ETC2_R8G8B8A8_UNORM_BLOCK },
-	{ .rhi = Format.ETC2_R8G8B8A8_SRGB, .vk = vk::Format.ETC2_R8G8B8A8_SRGB_BLOCK },
-	{ .rhi = Format.ETC2_EAC_R11_UNORM, .vk = vk::Format.EAC_R11_UNORM_BLOCK },
-	{ .rhi = Format.ETC2_EAC_R11_SNORM, .vk = vk::Format.EAC_R11_SNORM_BLOCK },
-	{ .rhi = Format.ETC2_EAC_R11G11_UNORM, .vk = vk::Format.EAC_R11G11_UNORM_BLOCK },
-	{ .rhi = Format.ETC2_EAC_R11G11_SNORM, .vk = vk::Format.EAC_R11G11_SNORM_BLOCK },
-};
-
-fn vk::Format to_vk_format(Format format)
-{
-	foreach (m : VK_FORMAT_MAPPINGS)
-	{
-		if (m.rhi == format) return m.vk;
-	}
-	return vk::Format.UNDEFINED;
-}
-
-fn Format from_vk_format(vk::Format format)
-{
-	foreach (m : VK_FORMAT_MAPPINGS)
-	{
-		if (m.vk == format) return m.rhi;
-	}
-	return Format.UNKNOWN;
-}
-
 fn void? vk_check(vk::Result r)
 {
 	switch (r)
@@ -253,9 +139,9 @@ fn void? vk_check(vk::Result r)
 			return OUT_OF_DEVICE_MEMORY~;
 		case vk::Result.ERROR_DEVICE_LOST:
 			return DEVICE_LOST~;
-		case vk::Result.ERROR_SURFACE_LOST_KHR:
+		case (vk::Result)-1000000000:
 			return SURFACE_LOST~;
-		case vk::Result.ERROR_OUT_OF_DATE_KHR:
+		case (vk::Result)-1000001004:
 			return OUT_OF_DATE~;
 		case vk::Result.TIMEOUT:
 			return TIMEOUT~;

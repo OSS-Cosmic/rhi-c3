@@ -197,16 +197,16 @@ fn void? clear_frame_impl()
 			.store_op = rhi::StoreOp.STORE,
 			.clear_color = { 0.1, 0.2, 0.4, 1.0 },
 		}},
-		.render_area = { .width = width, .height = height },
+		.render_area = { .width = (float)width, .height = (float)height },
 	});
 
 	if (rhi::renderer.backend != rhi::Backend.WGPU)
 	{
 		rhi::CmdClearRegion[4] regions = {
-			{ .color = { 0.0, 0.0, 0.0, 1.0 }, .rect = { .x = 0, .y = 0, .width = width / 2, .height = height / 2 } },
-			{ .color = { 1.0, 0.0, 0.0, 1.0 }, .rect = { .x = (int)(width / 2), .y = 0, .width = width - width / 2, .height = height / 2 } },
-			{ .color = { 0.0, 1.0, 0.0, 1.0 }, .rect = { .x = 0, .y = (int)(height / 2), .width = width / 2, .height = height - height / 2 } },
-			{ .color = { 0.0, 0.0, 1.0, 1.0 }, .rect = { .x = (int)(width / 2), .y = (int)(height / 2), .width = width - width / 2, .height = height - height / 2 } },
+			{ .color = { 0.0, 0.0, 0.0, 1.0 }, .rect = { .x = 0, .y = 0, .width = (float)(width / 2), .height = (float)(height / 2) } },
+			{ .color = { 1.0, 0.0, 0.0, 1.0 }, .rect = { .x = (float)(width / 2), .y = 0, .width = (float)(width - width / 2), .height = (float)(height / 2) } },
+			{ .color = { 0.0, 1.0, 0.0, 1.0 }, .rect = { .x = 0, .y = (float)(height / 2), .width = (float)(width / 2), .height = (float)(height - height / 2) } },
+			{ .color = { 0.0, 0.0, 1.0, 1.0 }, .rect = { .x = (float)(width / 2), .y = (float)(height / 2), .width = (float)(width - width / 2), .height = (float)(height - height / 2) } },
 		};
 		rhi::cmd_clear_attachment_regions(cmd, &state.device, regions[..]);
 	}

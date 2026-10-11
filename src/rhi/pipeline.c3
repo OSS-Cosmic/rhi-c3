@@ -13,6 +13,7 @@ enum VertexFormat : char
 	FLOAT2,
 	FLOAT3,
 	FLOAT4,
+	UBYTE4_NORM,
 }
 
 struct VertexAttribute
@@ -256,7 +257,7 @@ fn Pipeline? pipeline_init_graphics(Device* device, PipelineGraphicsOptions opti
 				return pipeline_init_graphics_webgl(device, options);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void pipeline_deinit(Pipeline* p, Device* device)
@@ -423,19 +424,17 @@ fn Pipeline? pipeline_init_graphics_mtl(Device* device, PipelineGraphicsOptions 
 			return INITIALIZATION_FAILED~;
 		}
 
-		if (options.has_depth)
+		mtl::DepthStencilDescriptor dss_desc = mtl::new_depth_stencil_descriptor();
+		defer dss_desc.release();
+		dss_desc.set_depth_compare_function(options.has_depth ?
+			mtl_compare_function(options.depth.compare) : mtl::CompareFunction.ALWAYS);
+		dss_desc.set_depth_write_enabled(options.has_depth && options.depth.write);
+		result.depth_stencil = dev.new_depth_stencil_state(dss_desc);
+		if (!result.depth_stencil)
 		{
-			mtl::DepthStencilDescriptor dss_desc = mtl::new_depth_stencil_descriptor();
-			defer dss_desc.release();
-			dss_desc.set_depth_compare_function(mtl_compare_function(options.depth.compare));
-			dss_desc.set_depth_write_enabled(options.depth.write);
-			result.depth_stencil = dev.new_depth_stencil_state(dss_desc);
-			if (!result.depth_stencil)
-			{
-				log::error("MTLDepthStencilState creation failed");
-				result.state.release();
-				return INITIALIZATION_FAILED~;
-			}
+			log::error("MTLDepthStencilState creation failed");
+			result.state.release();
+			return INITIALIZATION_FAILED~;
 		}
 	};
 	return { .cookie = next_cookie(), .backend.mtl = result };
@@ -489,6 +488,7 @@ fn dxgi::Format dx12_vertex_format(VertexFormat format) @local
 		case FLOAT2: return dxgi::Format.R32G32_FLOAT;
 		case FLOAT3: return dxgi::Format.R32G32B32_FLOAT;
 		case FLOAT4: return dxgi::Format.R32G32B32A32_FLOAT;
+		case UBYTE4_NORM: return dxgi::Format.R8G8B8A8_UNORM;
 	}
 }
 
@@ -854,6 +854,7 @@ fn vk::Format to_vk_vertex_format(VertexFormat format) @private
 	case FLOAT2: return vk::Format.R32G32_SFLOAT;
 	case FLOAT3: return vk::Format.R32G32B32_SFLOAT;
 	case FLOAT4: return vk::Format.R32G32B32A32_SFLOAT;
+	case UBYTE4_NORM: return vk::Format.R8G8B8A8_UNORM;
 	}
 }
 
@@ -896,14 +897,14 @@ fn Pipeline? pipeline_init_graphics_vk(Device* device, PipelineGraphicsOptions o
 	vk::PipelineShaderStageCreateInfo[2] stages = {
 		{
 			.sType = vk::StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
-			.stage = vk::SHADER_STAGE_VERTEX_BIT,
-			.module_ = shader.vertex_module,
+			.stage = (vk::ShaderStageFlagBits)vk::SHADER_STAGE_VERTEX_BIT,
+			.vkmodule = shader.vertex_module,
 			.pName = "main",
 		},
 		{
 			.sType = vk::StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
-			.stage = vk::SHADER_STAGE_FRAGMENT_BIT,
-			.module_ = shader.pixel_module,
+			.stage = (vk::ShaderStageFlagBits)vk::SHADER_STAGE_FRAGMENT_BIT,
+			.vkmodule = shader.pixel_module,
 			.pName = "main",
 		},
 	};
@@ -981,7 +982,7 @@ fn Pipeline? pipeline_init_graphics_vk(Device* device, PipelineGraphicsOptions o
 	};
 	vk::PipelineMultisampleStateCreateInfo multisample = {
 		.sType = vk::StructureType.PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-		.rasterizationSamples = vk::SAMPLE_COUNT_1_BIT,
+		.rasterizationSamples = (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_1_BIT,
 		.sampleShadingEnable = vk::FALSE,
 	};
 
@@ -1068,7 +1069,7 @@ fn Pipeline? pipeline_init_graphics_vk(Device* device, PipelineGraphicsOptions o
 
 	vk::Pipeline pipeline;
 	if (catch err = vk_check(device.backend.vk.vtable.createGraphicsPipelines(
-		device.backend.vk.device, vk::NULL_HANDLE, 1, &pipeline_info, null, &pipeline))) {
+		device.backend.vk.device, (vk::PipelineCache)0, 1, &pipeline_info, null, &pipeline))) {
 		device.backend.vk.vtable.destroyPipelineLayout(device.backend.vk.device, layout, null);
 		return err~;
 	}
@@ -1081,10 +1082,10 @@ fn Pipeline? pipeline_init_graphics_vk(Device* device, PipelineGraphicsOptions o
 
 fn void pipeline_deinit_vk(Pipeline* pipeline, Device* device)
 {
-	if (pipeline.backend.vk.pipeline != vk::NULL_HANDLE) {
+	if (pipeline.backend.vk.pipeline != (vk::Pipeline)0) {
 		device.backend.vk.vtable.destroyPipeline(device.backend.vk.device, pipeline.backend.vk.pipeline, null);
 	}
-	if (pipeline.backend.vk.layout != vk::NULL_HANDLE) {
+	if (pipeline.backend.vk.layout != (vk::PipelineLayout)0) {
 		device.backend.vk.vtable.destroyPipelineLayout(device.backend.vk.device, pipeline.backend.vk.layout, null);
 	}
 	pipeline.backend.vk = {};

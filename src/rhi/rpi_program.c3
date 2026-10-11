@@ -12,8 +12,7 @@
 //     `RpiDescriptorSetAlloc`.
 //
 // Only the Vulkan arm exists; compute pipelines, ray tracing and bindless /
-// external sets are not ported yet. Every other backend returns
-// `UNSUPPORTED_BACKEND`.
+// external sets are not ported yet. Other backend arms are unreachable.
 //
 // The `ProgramVk` / `ProgramPipelineSlotVk` / `ProgramDescriptorSetVk`
 // stand-ins for a build without Vulkan live in backend_stubs.c3.
@@ -223,7 +222,7 @@ fn Program? program_init(Device* device, ProgramModuleStage[] modules, ProgramLa
 		case WEBGL:
 			break;
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 // Fills `reflection` (name hash -> set/register) and tallies the per-set pool
@@ -323,7 +322,7 @@ fn void? program_bind_pipeline(Program* p, Device* device, Cmd* cmd, ulong pipel
 		case WEBGL:
 			break;
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 // Uploads push constants against the program's layout and declared stages.
@@ -361,7 +360,7 @@ fn void? program_bind_descriptors(Program* p, Device* device, Cmd* cmd, uint fra
 		case WEBGL:
 			break;
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 // ---- vulkan ----
@@ -510,7 +509,7 @@ fn void program_deinit_vk(Program* p, Device* device)
 	p.pipelines.@each(; ulong key, ProgramPipelineSlot slot)
 	{
 		(void)key;
-		if (slot.backend.vk.pipeline != vk::NULL_HANDLE) {
+		if (slot.backend.vk.pipeline != (vk::Pipeline)0) {
 			vtable.destroyPipeline(dev, slot.backend.vk.pipeline, null);
 		}
 	};
@@ -520,12 +519,12 @@ fn void program_deinit_vk(Program* p, Device* device)
 	{
 		ProgramDescriptorSetSlot* slot = &p.sets[i];
 		if (slot.used) rpi_descriptor_set_alloc_free(&slot.backend.vk.alloc, device);
-		if (slot.backend.vk.set_layout != vk::NULL_HANDLE) {
+		if (slot.backend.vk.set_layout != (vk::DescriptorSetLayout)0) {
 			vtable.destroyDescriptorSetLayout(dev, slot.backend.vk.set_layout, null);
 		}
 		slot.backend.vk = {};
 	}
-	if (p.backend.vk.pipeline_layout != vk::NULL_HANDLE) {
+	if (p.backend.vk.pipeline_layout != (vk::PipelineLayout)0) {
 		vtable.destroyPipelineLayout(dev, p.backend.vk.pipeline_layout, null);
 	}
 	p.backend.vk = {};
@@ -535,7 +534,7 @@ fn void program_destroy_pipeline_modules_vk(Device* device, vk::ShaderModule[] m
 {
 	foreach (shader_module : modules)
 	{
-		if (shader_module != vk::NULL_HANDLE) {
+		if (shader_module != (vk::ShaderModule)0) {
 			device.backend.vk.vtable.destroyShaderModule(device.backend.vk.device, shader_module, null);
 		}
 	}
@@ -605,7 +604,7 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 	};
 	vk::PipelineMultisampleStateCreateInfo multisample = {
 		.sType = vk::StructureType.PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-		.rasterizationSamples = vk::SAMPLE_COUNT_1_BIT,
+		.rasterizationSamples = (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_1_BIT,
 		.minSampleShading = 1.0,
 	};
 	vk::PipelineDepthStencilStateCreateInfo depth_stencil = {
@@ -694,8 +693,8 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 		}
 		stages[stage_count] = {
 			.sType = vk::StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
-			.stage = vk::SHADER_STAGE_VERTEX_BIT,
-			.module_ = modules[stage_count],
+			.stage = (vk::ShaderStageFlagBits)vk::SHADER_STAGE_VERTEX_BIT,
+			.vkmodule = modules[stage_count],
 			.pName = vertex.entry_point,
 		};
 		stage_count++;
@@ -716,8 +715,8 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 		}
 		stages[stage_count] = {
 			.sType = vk::StructureType.PIPELINE_SHADER_STAGE_CREATE_INFO,
-			.stage = vk::SHADER_STAGE_FRAGMENT_BIT,
-			.module_ = modules[stage_count],
+			.stage = (vk::ShaderStageFlagBits)vk::SHADER_STAGE_FRAGMENT_BIT,
+			.vkmodule = modules[stage_count],
 			.pName = fragment.entry_point,
 		};
 		stage_count++;
@@ -742,7 +741,7 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 	vk_add_next(&create_info, &rendering);
 
 	vk::Pipeline pipeline;
-	if (catch err = vk_check(vtable.createGraphicsPipelines(dev, vk::NULL_HANDLE, 1, &create_info, null, &pipeline)))
+	if (catch err = vk_check(vtable.createGraphicsPipelines(dev, (vk::PipelineCache)0, 1, &create_info, null, &pipeline)))
 	{
 		program_destroy_pipeline_modules_vk(device, modules[:stage_count]);
 		return err~;
@@ -1176,6 +1175,6 @@ fn vk::DescriptorType vk_descriptor_type_from(DescriptorType type)
 		case SAMPLER: return vk::DescriptorType.SAMPLER;
 		case UNIFORM_BUFFER: return vk::DescriptorType.UNIFORM_BUFFER;
 		case STORAGE_BUFFER: return vk::DescriptorType.STORAGE_BUFFER;
-		case ACCELERATION_STRUCTURE: return vk::DescriptorType.ACCELERATION_STRUCTURE_KHR;
+		case ACCELERATION_STRUCTURE: return (vk::DescriptorType)1000150000;
 	}
 }

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Build one example with c3c from the repository root.
 
-linux-x64 links an executable; wasm32 links a .wasm and packages the browser
-bundle (glue, index.html) next to it; other targets are compile-only (-C),
-since the host cannot link or run them.
+linux-x64 and macos-aarch64 link executables; wasm32 links a .wasm and packages
+the browser bundle (glue, index.html) next to it; other targets are compile-only.
 
 usage: c3_example.py <c3c> <example> <target> <outdir> <stamp> [sdl3 link flag ...]
 """
@@ -29,18 +28,36 @@ def main(argv):
     c3c, example, target, outdir, stamp = argv[1], argv[2], argv[3], Path(argv[4]), Path(argv[5])
     sdl3_flags = argv[6:]
     imgui = example in IMGUI_EXAMPLES
+    if imgui and not (ROOT / "vendor/imgui_c/lib/libimgui.a").is_file():
+        print(
+            "ImGui example requires vendor/imgui_c/lib/libimgui.a; initialize "
+            "vendor/imgui_c/imgui and build the imgui target first.",
+            file=sys.stderr,
+        )
+        return 1
     outdir.mkdir(parents=True, exist_ok=True)
     cmd = [c3c, "compile", f"examples/{example}/main.c3", "examples/platform/platform.c3", "src/**",
-           "--target", target, "-o", str(outdir / example)]
+           "--target", target, "--libdir", ".", "--lib", "vulkan", "-o", str(outdir / example)]
     if imgui:
         cmd += ["-D", "RHI_IMGUI"]
     if target == "linux-x64":
         cmd += ["-D", "RHI_VK"]
+    elif target == "macos-aarch64":
+        cmd += ["-D", "RHI_MTL", "--libdir", ".", "--lib", "sdl3"]
+        if imgui:
+            cmd += ["-L", "vendor/imgui_c/lib", "-l", "imgui", "-l", "c++"]
+        for framework in (
+            "Cocoa", "IOKit", "ForceFeedback", "Carbon", "CoreAudio",
+            "AudioToolbox", "AVFoundation", "CoreMedia", "CoreVideo",
+            "GameController", "CoreHaptics", "UniformTypeIdentifiers",
+            "ApplicationServices",
+        ):
+            cmd += ["-z", "-framework", "-z", framework]
     if target == "linux-x64":
-        cmd += ["-L", "vendor/vma/lib", "-l", "vma", "-L", "vendor/volk/lib", "-l", "volk", "-l", "stdc++", "-l", "SDL3", *sdl3_flags]
+        cmd += ["-L", "vendor/lib", "-l", "vma", "-L", "vendor/volk/lib", "-l", "volk", "-l", "stdc++"]
         if imgui:
             cmd += ["-L", "vendor/imgui_c/lib", "-l", "imgui"]
-    elif target != "wasm32":
+    elif target not in ("wasm32", "macos-aarch64"):
         cmd += ["-C"]
     status = subprocess.run(cmd, cwd=ROOT, check=False).returncode
     if status == 0:

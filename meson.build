@@ -20,18 +20,21 @@ endif
 
 # --- vma ----------------------------------------------------------------
 vma = static_library(
-  'vma', 'vendor/vma/vma_impl.cpp',
-  include_directories: include_directories('vendor/vma/include'),
+  'vma', 'vendor/vma_impl.cpp',
+  include_directories: include_directories('vendor/VulkanMemoryAllocator/include'),
+  cpp_args: ['-DVMA_STATIC_VULKAN_FUNCTIONS=0', '-DVMA_DYNAMIC_VULKAN_FUNCTIONS=1'],
   override_options: ['cpp_std=c++17', 'optimization=2', 'b_staticpic=true'],
+  build_by_default: false,
 )
 stage_vma = custom_target(
   'stage-vma',
   input: vma, output: 'vma.stamp',
-  command: [python, stage, '@INPUT@', root / 'vendor/vma/lib', '@OUTPUT@'],
-  build_by_default: true,
+  command: [python, stage, '@INPUT@', root / 'vendor/lib', '@OUTPUT@'],
+  build_by_default: false,
 )
-stage_deps = [stage_vma]
+vulkan_deps = [vma, stage_vma]
 test_deps = [vma, stage_vma]
+imgui_test_deps = []
 
 # --- volk (Vulkan loader; needs the vendor/volk submodule) ---------------
 if fs.is_file('vendor/volk/volk.c')
@@ -47,7 +50,7 @@ if fs.is_file('vendor/volk/volk.c')
     command: [python, stage, '@INPUT@', root / 'vendor/volk/lib', '@OUTPUT@'],
     build_by_default: true,
   )
-  stage_deps += [stage_volk]
+  vulkan_deps += [volk, stage_volk]
   test_deps += [volk, stage_volk]
 else
   message('volk skipped: vendor/volk is missing; run: git submodule update --init vendor/volk')
@@ -63,7 +66,7 @@ if fs.is_file('vendor/imgui_c/imgui/imgui.cpp')
     include_directories: include_directories('vendor/imgui_c/imgui', 'vendor/imgui_c'),
     override_options: [
       'cpp_std=c++17', 'optimization=2', 'b_staticpic=true',
-      'cpp_eh=none', 'cpp_rtti=false',
+      'cpp_eh=none', 'cpp_rtti=false', 'b_ndebug=true',
     ],
   )
   stage_imgui = custom_target(
@@ -72,6 +75,8 @@ if fs.is_file('vendor/imgui_c/imgui/imgui.cpp')
     command: [python, stage, '@INPUT@', root / 'vendor/imgui_c/lib', '@OUTPUT@'],
     build_by_default: true,
   )
+  imgui_test_deps += [imgui, stage_imgui]
+  vulkan_deps += [imgui, stage_imgui]
   test_deps += [imgui, stage_imgui]
 else
   message('imgui skipped: vendor/imgui_c/imgui is missing; run: git submodule update --init vendor/imgui_c/imgui')
@@ -119,11 +124,14 @@ if sdl3_flags == ['']
 endif
 
 if c3c.found()
+  # The host tests need VMA and volk on Vulkan hosts, but the macOS host
+  # exercises Metal and should not compile Vulkan-only support libraries.
+  host_test_deps = host_machine.system() == 'darwin' ? imgui_test_deps : test_deps
   test(
     'c3-host', c3c,
-    args: ['test', '-z', '-lSDL3'] + sdl3_flags,
+    args: ['test'] + sdl3_flags,
     workdir: root,
-    depends: test_deps,
+    depends: host_test_deps,
     is_parallel: false,
     timeout: 600,
   )
@@ -157,14 +165,42 @@ if c3c.found()
   native_examples = ['00_clear', '01_shader', '02_mesh', '03_imgui', '04_svt']
   web_examples = ['00_clear', '01_shader', '02_mesh', '05_texture']
   has_shaders = ['01_shader', '02_mesh', '03_imgui', '04_svt', '05_texture']
-  # backend -> [c3c target, slangc targets, library targets the build needs, examples]
+  c3_sources = files(
+    'src/rhi/accel_structure.c3', 'src/rhi/alloc/index_pool.c3',
+    'src/rhi/alloc/offset_alloc.c3', 'src/rhi/alloc/segment_alloc.c3',
+    'src/rhi/backend_stubs.c3', 'src/rhi/buffer.c3', 'src/rhi/cmd.c3',
+    'src/rhi/cmd_ring.c3', 'src/rhi/descriptor.c3', 'src/rhi/device.c3',
+    'src/rhi/dx12_barrier.c3', 'src/rhi/dx12_mip_generation.c3',
+    'src/rhi/fence.c3', 'src/rhi/format.c3', 'src/rhi/gpu_preset.c3',
+    'src/rhi/gpu_ref.c3', 'src/rhi/image.c3', 'src/rhi/image_view.c3',
+    'src/rhi/imgui.c3', 'src/rhi/physical_adapter.c3', 'src/rhi/pipeline.c3',
+    'src/rhi/pogo_buffer.c3', 'src/rhi/pool.c3', 'src/rhi/query.c3',
+    'src/rhi/queue.c3', 'src/rhi/renderer.c3', 'src/rhi/rhi.c3',
+    'src/rhi/rpi_program.c3', 'src/rhi/sampler.c3', 'src/rhi/scratch_alloc.c3',
+    'src/rhi/semaphore.c3', 'src/rhi/shader.c3', 'src/rhi/swapchain.c3',
+    'src/rhi/time_keeper.c3', 'src/rhi/timeline.c3', 'src/rhi/vk_helpers.c3',
+    'src/rhi/vk_pending.c3', 'src/rhi/webgl.c3', 'src/rhi/webgpu.c3',
+    'src/vendor/d3d12/d3d12.c3',
+    'src/vendor/d3d12/dxgi.c3', 'src/vendor/d3d12/layout.c3',
+    'src/vendor/d3d12/procedures.c3', 'src/vendor/d3d12ma/d3d12ma.c3',
+    'src/vendor/imgui/imgui.c3', 'src/vendor/metal/foundation.c3',
+    'src/vendor/metal/metal.c3', 'src/vendor/metal/quartzcore.c3',
+    'src/vendor/metal/types.c3', 'src/vendor/metal/wrapper.c3',
+    'src/vendor/sdl3/sdl3.c3', 'src/vendor/vma/vma.c3',
+    'src/vendor/volk/volk.c3', 'src/vendor/vulkan/core.c3',
+    'src/vendor/vulkan/enums.c3', 'src/vendor/vulkan/procedures.c3',
+    'src/vendor/vulkan/structs.c3',
+  )
+  # backend -> [c3c target, shader formats, library targets, examples]
   backends = {
-    'vulkan': ['linux-x64', ['spirv'], test_deps, native_examples],
-    'dx12': ['windows-x64', [], d3d12ma_target, native_examples],
-    'metal': ['macos-aarch64', ['metal'], [], native_examples],
+    'vulkan': ['linux-x64', ['spirv'], vulkan_deps, native_examples],
+    'dx12': ['windows-x64', ['spirv'], d3d12ma_target, native_examples],
+    'metal': ['macos-aarch64', ['metal'], imgui_test_deps, ['00_clear', '01_shader', '02_mesh', '03_imgui']],
     'web': ['wasm32', ['wgsl', 'glsl'], [], web_examples],
   }
   all_examples = []
+  all_shader_targets = []
+  macos_examples = []
   foreach backend, cfg : backends
     outputs = []
     shader_targets = []
@@ -177,14 +213,12 @@ if c3c.found()
           elif shader_backend == 'glsl' and not spirv_cross.found()
             message('shaders-' + backend + '-glsl-' + ex + ' skipped: spirv-cross not found (set $SPIRV_CROSS or -Dspirv_cross=)')
           else
-            # web examples keep shaders next to the wasm bundle
-            shader_dir = backend == 'web' ? 'web' / ex : 'examples' / ex / 'shaders'
             ex_shaders += custom_target(
               'shaders-' + backend + '-' + shader_backend + '-' + ex,
               output: 'shaders-' + backend + '-' + shader_backend + '-' + ex + '.stamp',
               command: [python, build_shaders, slangc, shader_backend,
                         files('examples' / ex / 'shaders.txt'),
-                        meson.project_build_root() / shader_dir,
+                        root / 'build' / 'examples' / ex / 'shaders',
                         '@OUTPUT@'] + (shader_backend == 'glsl' ? [spirv_cross] : []),
               build_by_default: false,
             )
@@ -198,7 +232,8 @@ if c3c.found()
         command: [python, c3_example, c3c, ex, cfg[0],
                   meson.project_build_root() / outdir,
                   '@OUTPUT@'] + (backend == 'vulkan' ? sdl3_flags : []),
-        depends: cfg[2],
+        depends: cfg[2] + ex_shaders,
+        depend_files: c3_sources + files('examples' / ex / 'main.c3', 'examples/platform/platform.c3'),
         build_by_default: false,
       )
       # one target per example: <backend>-<example>, e.g. vulkan-01_shader
@@ -208,9 +243,19 @@ if c3c.found()
     endforeach
     alias_target(backend, outputs, shader_targets)
     all_examples += [outputs, shader_targets]
+    all_shader_targets += shader_targets
+    if backend == 'metal'
+      macos_examples += outputs
+      macos_examples += shader_targets
+    endif
   endforeach
-  # every example on every backend
-  alias_target('examples', all_examples)
+  # On macOS, the aggregate means examples runnable on the host. Other hosts
+  # retain the all-backend aggregate, including Vulkan's VMA dependency.
+  if host_machine.system() == 'darwin'
+    alias_target('examples', macos_examples)
+  else
+    alias_target('examples', all_examples + all_shader_targets)
+  endif
 else
   message('c3c not found: meson test and check targets disabled (set $C3C or -Dc3c=)')
 endif

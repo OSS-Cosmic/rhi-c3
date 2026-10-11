@@ -48,7 +48,7 @@ fn void? command_ring_element_wait(CommandRingElement* e, Device* device)
 				return command_ring_element_wait_webgl(e, device);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 struct CommandRingBuffer <POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE>
@@ -95,7 +95,7 @@ fn CommandRingBuffer{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE}? command_ring_buf
 				return command_ring_buffer_init_webgl{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE}(device, queue);
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void command_ring_buffer_deinit(CommandRingBuffer{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE}* r, Device* device) <POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE>
@@ -200,10 +200,10 @@ fn CommandRingBuffer{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE}? command_ring_buf
 	};
 	for (sz pool_index = 0; pool_index < POOL_COUNT; pool_index++)
 	{
-		result.pools[pool_index] = pool_init_mtl(device, queue)!;
+		result.pools[pool_index] = pool_init(device, queue)!;
 		for (sz cmd_index = 0; cmd_index < CMD_PER_POOL; cmd_index++)
 		{
-			result.cmds[pool_index][cmd_index] = cmd_init_mtl(device, &result.pools[pool_index])!;
+			result.cmds[pool_index][cmd_index] = cmd_init(device, &result.pools[pool_index])!;
 		}
 	}
 	return result;
@@ -217,7 +217,7 @@ fn void command_ring_buffer_deinit_mtl(CommandRingBuffer{POOL_COUNT, CMD_PER_POO
 		{
 			cmd_deinit(&r.cmds[pool_index][cmd_index], device, &r.pools[pool_index]);
 		}
-		pool_deinit_mtl(&r.pools[pool_index], device);
+		pool_deinit(&r.pools[pool_index], device);
 	}
 	*r = {};
 }
@@ -227,7 +227,7 @@ fn CommandRingElement command_ring_buffer_get_mtl(CommandRingBuffer{POOL_COUNT, 
 	assert(r.pool_index < POOL_COUNT, "Metal: command ring must be advanced before get");
 	assert(num_cmds > 0 && num_cmds <= CMD_PER_POOL - r.cmd_index, "Metal: command ring command range exhausted");
 	CommandRingElement result = {
-		.cmds = r.cmds[r.pool_index][r.cmd_index .. r.cmd_index + num_cmds],
+		.cmds = r.cmds[r.pool_index][r.cmd_index : num_cmds],
 		.pool = &r.pools[r.pool_index],
 		.backend.mtl = {},
 	};
@@ -270,7 +270,7 @@ fn CommandRingBuffer{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE}? command_ring_buf
 	CommandRingBuffer{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE} result = {};
 	for (sz pool_index = 0; pool_index < POOL_COUNT; pool_index++)
 	{
-		result.pools[pool_index] = pool_init_dx12(device, queue)!;
+		result.pools[pool_index] = pool_init(device, queue)!;
 		for (sz cmd_index = 0; cmd_index < CMD_PER_POOL; cmd_index++)
 		{
 			result.cmds[pool_index][cmd_index] = cmd_init(device, &result.pools[pool_index])!;
@@ -291,7 +291,7 @@ fn void command_ring_buffer_deinit_dx12(CommandRingBuffer{POOL_COUNT, CMD_PER_PO
 		{
 			cmd_deinit(&r.cmds[pool_index][cmd_index], device, &r.pools[pool_index]);
 		}
-		pool_deinit_dx12(&r.pools[pool_index], device);
+		pool_deinit(&r.pools[pool_index], device);
 	}
 	*r = {};
 }
@@ -332,7 +332,7 @@ struct CommandRingBufferVk <POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE>
 
 fn void? command_ring_element_wait_vk(CommandRingElement* e, Device* device)
 {
-	if (e == null || e.backend.vk.fence == 0) return;
+	if (e == null || e.backend.vk.fence == (vk::Fence)0) return;
 	vk::Fence fence = e.backend.vk.fence;
 	return vk_check(device.backend.vk.vtable.waitForFences(
 		device.backend.vk.device, 1, &fence, vk::TRUE, ulong::max));
@@ -345,10 +345,10 @@ fn CommandRingBuffer{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE}? command_ring_buf
 	CommandRingBuffer{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE} result = {};
 	for (sz pool_index = 0; pool_index < POOL_COUNT; pool_index++)
 	{
-		result.pools[pool_index] = pool_init_vk(device, queue)!;
+		result.pools[pool_index] = pool_init(device, queue)!;
 		for (sz cmd_index = 0; cmd_index < CMD_PER_POOL; cmd_index++)
 		{
-			result.cmds[pool_index][cmd_index] = cmd_init_vk(device, &result.pools[pool_index])!;
+			result.cmds[pool_index][cmd_index] = cmd_init(device, &result.pools[pool_index])!;
 			$if SYNC_PRIMITIVE:
 				vk::SemaphoreCreateInfo semaphore_info = { .sType = SEMAPHORE_CREATE_INFO };
 				vk_check(device.backend.vk.vtable.createSemaphore(
@@ -388,7 +388,7 @@ fn void command_ring_buffer_deinit_vk(CommandRingBuffer{POOL_COUNT, CMD_PER_POOL
 		{
 			cmd_deinit(&r.cmds[pool_index][cmd_index], device, &r.pools[pool_index]);
 		}
-		pool_deinit_vk(&r.pools[pool_index], device);
+		pool_deinit(&r.pools[pool_index], device);
 	}
 	*r = {};
 }

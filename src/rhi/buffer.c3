@@ -4,6 +4,7 @@
 // Backend-neutral buffer. Port of the Vulkan arm of rhi-zig's `buffer.zig`
 // `Buffer` type.
 module rhi;
+import d3d12, dxgi, d3d12ma, mtl, vk, vma;
 
 enum BufferUsageFlag : char
 {
@@ -82,32 +83,181 @@ struct Buffer
 	}
 }
 
+<*
+ @require [desc] desc.size > 0 : `BufferDesc size must be positive.`
+*>
 fn Buffer? buffer_init_general(Device* device, BufferDesc desc)
 {
 	switch (renderer.backend)
 	{
 		case VK:
 			$if HAS_VK:
-				return buffer_init_general_vk(device, desc);
+				{
+					vk::BufferCreateInfo create_info = {
+						.sType = vk::StructureType.BUFFER_CREATE_INFO,
+						.size = (vk::DeviceSize)desc.size,
+						.usage = buffer_usage_flags_vk(device, desc),
+						.sharingMode = vk::SharingMode.EXCLUSIVE,
+					};
+					vma::AllocationCreateInfo allocation_info = buffer_allocation_info_vk(desc);
+					vk::Buffer buffer;
+					vma::Allocation allocation;
+					vma::AllocationInfo vma_info;
+					vk::Result result = vma::create_buffer(device.backend.vk.vma_allocator, &create_info, &allocation_info, &buffer, &allocation, &vma_info);
+					vk_check(result)!;
+
+					char[] mapped_region;
+					if (vma_info.mapped_data != null) {
+						mapped_region = ((char*)vma_info.mapped_data)[:desc.size];
+					}
+					return {
+						.cookie = next_cookie(),
+						.mapped_region = mapped_region,
+						.backend.vk = { .buffer = buffer, .allocation = allocation, .size = (ulong)desc.size },
+					};
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				return buffer_init_general_dx12(device, desc);
+				{
+					if ((ulong)desc.size > device.adapter.buffer_max_size) return UNSUPPORTED_FEATURE~;
+
+					d3d12::HeapType heap_type = buffer_heap_type_dx12(desc);
+					// UPLOAD heaps must be created GENERIC_READ and READBACK heaps COPY_DEST;
+					// neither can transition.
+					d3d12::ResourceStates initial_state = d3d12::RESOURCE_STATE_COMMON;
+					if (heap_type == d3d12::HeapType.UPLOAD)
+					{
+						initial_state = d3d12::RESOURCE_STATE_GENERIC_READ;
+					}
+					else if (heap_type == d3d12::HeapType.READBACK)
+					{
+						initial_state = d3d12::RESOURCE_STATE_COPY_DEST;
+					}
+					else if (desc.usage.acceleration_structure_storage)
+					{
+						initial_state = d3d12::RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+					}
+
+					// UAV access is only legal on DEFAULT heap resources.
+					d3d12::ResourceFlags flags = d3d12::RESOURCE_FLAG_NONE;
+					if (heap_type == d3d12::HeapType.DEFAULT
+						&& (desc.usage.shader_resource_storage || desc.usage.scratch_buffer || desc.usage.acceleration_structure_storage))
+					{
+						flags |= d3d12::RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+					}
+
+					d3d12::ResourceDesc resource_desc = {
+						.dimension = d3d12::ResourceDimension.BUFFER,
+						.alignment = 0,
+						.width = (ulong)desc.size,
+						.height = 1,
+						.depth_or_array_size = 1,
+						.mip_levels = 1,
+						.format = dxgi::Format.UNKNOWN,
+						.sample_desc = { .count = 1, .quality = 0 },
+						.layout = d3d12::TextureLayout.ROW_MAJOR,
+						.flags = flags,
+					};
+					d3d12ma::AllocationDesc alloc_desc = { .heap_type = (int)heap_type };
+
+					d3d12ma::Allocation allocation;
+					int hr = d3d12ma::create_resource(device.backend.dx12.allocator, &alloc_desc, &resource_desc, (uint)initial_state, null, &allocation, null);
+					if (hr < 0 || !allocation) return OUT_OF_DEVICE_MEMORY~;
+
+					d3d12::Resource* resource = (d3d12::Resource*)d3d12ma::allocation_get_resource(allocation);
+					void* mapped;
+					char[] mapped_region;
+					if (heap_type != d3d12::HeapType.DEFAULT)
+					{
+						// READBACK is read by the CPU; UPLOAD is write-only (empty read range).
+						ulong read_end = heap_type == d3d12::HeapType.READBACK ? (ulong)desc.size : 0;
+						if (d3d12ma::map(allocation, 0, read_end, &mapped) < 0 || !mapped)
+						{
+							d3d12ma::free_allocation(allocation);
+							return INITIALIZATION_FAILED~;
+						}
+						mapped_region = ((char*)mapped)[:desc.size];
+					}
+					return {
+						.cookie = next_cookie(),
+						.mapped_region = mapped_region,
+						.backend.dx12 = {
+							.allocation = allocation,
+							.resource = resource,
+							.gpu_address = resource.vtbl.get_gpu_virtual_address(resource),
+							.heap_type = heap_type,
+							.initial_state = initial_state,
+							.size = (ulong)desc.size,
+							.mapped = mapped,
+						},
+					};
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				return buffer_init_general_mtl(device, desc);
+				{
+					if ((ulong)desc.size > device.adapter.buffer_max_size) return UNSUPPORTED_FEATURE~;
+					// rhi-zig always uses StorageModeShared. Extension: PREFER_DEVICE maps to
+					// StorageModePrivate (GPU-only, no host mapping; fill it with a blit).
+					bool shared = desc.buffer_usage != PREFER_DEVICE;
+					mtl::ResourceOptions options = shared ? mtl::RESOURCE_STORAGE_MODE_SHARED : mtl::RESOURCE_STORAGE_MODE_PRIVATE;
+					mtl::Buffer buffer = device.backend.mtl.device.new_buffer((NSUInteger)desc.size, options);
+					if (!buffer) return OUT_OF_DEVICE_MEMORY~;
+					char[] mapped_region;
+					if (shared)
+					{
+						char* contents = (char*)buffer.contents();
+						if (contents)
+						{
+							mapped_region = contents[:desc.size];
+						}
+						else
+						{
+							buffer.release();
+							return INITIALIZATION_FAILED~;
+						}
+					}
+					return {
+						.cookie = next_cookie(),
+						.mapped_region = mapped_region,
+						.backend.mtl = { .buffer = buffer, .size = (ulong)desc.size, .shared = shared },
+					};
+				}
 			$endif
 		case WGPU:
 			$if HAS_WGPU:
-				return buffer_init_general_wgpu(device, desc);
+				{
+					uint size = web_buffer_size(desc.size, device.adapter.buffer_max_size)!!;
+					uint usage = wgpu_buffer_usage(desc.usage, desc.persistent_map);
+					if (usage == 0) usage = WGPU_BUFFER_COPY_DST;
+					uint buffer = wgpu_device_create_buffer(device.backend.wgpu.device, size, usage);
+					if (buffer == 0) return OUT_OF_DEVICE_MEMORY~;
+					char[] mapped;
+					if (desc.persistent_map)
+					{
+						mapped = alloc::malloc(device.allocator, desc.size)[:desc.size];
+						if (mapped.ptr == null) { wgpu_release(buffer); return OUT_OF_DEVICE_MEMORY~; }
+					}
+					return { .cookie = next_cookie(), .mapped_region = mapped, .backend.wgpu = { .buffer = buffer, .size = (ulong)desc.size, .usage = usage } };
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				return buffer_init_general_webgl(device, desc);
+				{
+					uint size = web_buffer_size(desc.size, 256 * 1024 * 1024)!!;
+					Buffer b = {};
+					uint target = webgl_buffer_target(desc.usage);
+					b.backend.webgl.buffer = gl_create_buffer(target, size, webgl_buffer_usage(desc));
+					b.backend.webgl.size = size;
+					b.backend.webgl.target = target;
+					if (b.backend.webgl.buffer == 0) return OUT_OF_DEVICE_MEMORY~;
+					b.cookie = b.backend.webgl.buffer;
+					return b;
+				}
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void buffer_deinit(Buffer* b, Device* device)
@@ -117,23 +267,46 @@ fn void buffer_deinit(Buffer* b, Device* device)
 	{
 		case VK:
 			$if HAS_VK:
-				buffer_deinit_vk(b, device);
+				{
+					if (b.backend.vk.allocation != null) {
+						vma::destroy_buffer(device.backend.vk.vma_allocator, b.backend.vk.buffer, b.backend.vk.allocation);
+					}
+					b.backend.vk = {};
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				buffer_deinit_dx12(b, device);
+				{
+					BufferDx12* state = &b.backend.dx12;
+					if (state.allocation)
+					{
+						if (state.mapped) d3d12ma::unmap(state.allocation, 0, 0);
+						d3d12ma::free_allocation(state.allocation);
+					}
+					*state = {};
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				buffer_deinit_mtl(b, device);
+				{
+					if (b.backend.mtl.buffer) b.backend.mtl.buffer.release();
+					b.backend.mtl = {};
+				}
 			$endif
 		case WGPU:
 			$if HAS_WGPU:
-				buffer_deinit_wgpu(b, device);
+				{
+					wgpu_release_if(&b.backend.wgpu.buffer);
+					if (b.mapped_region.ptr != null) alloc::free(device.allocator, b.mapped_region.ptr);
+					b.backend.wgpu = {};
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				buffer_deinit_webgl(b, device);
+				{
+					if (b != null && b.backend.webgl.buffer != 0) gl_delete_buffer(b.backend.webgl.buffer);
+					if (b != null) b.backend.webgl.buffer = 0;
+				}
 			$endif
 	}
 	// All backends share this guard, making deinit idempotent at the RHI layer
@@ -307,43 +480,6 @@ struct BufferMtl
 	bool shared;
 }
 
-fn Buffer? buffer_init_general_mtl(Device* device, BufferDesc desc)
-{
-	if (desc.size <= 0) return UNSUPPORTED_FEATURE~;
-	if ((ulong)desc.size > device.adapter.buffer_max_size) return UNSUPPORTED_FEATURE~;
-	// rhi-zig always uses StorageModeShared. Extension: PREFER_DEVICE maps to
-	// StorageModePrivate (GPU-only, no host mapping; fill it with a blit).
-	bool shared = desc.buffer_usage != PREFER_DEVICE;
-	mtl::ResourceOptions options = shared ? mtl::RESOURCE_STORAGE_MODE_SHARED : mtl::RESOURCE_STORAGE_MODE_PRIVATE;
-	mtl::Buffer buffer = device.backend.mtl.device.new_buffer((NSUInteger)desc.size, options);
-	if (!buffer) return OUT_OF_DEVICE_MEMORY~;
-	char[] mapped_region;
-	if (shared)
-	{
-		char* contents = (char*)buffer.contents();
-		if (contents)
-		{
-			mapped_region = contents[:desc.size];
-		}
-		else
-		{
-			buffer.release();
-			return INITIALIZATION_FAILED~;
-		}
-	}
-	return {
-		.cookie = next_cookie(),
-		.mapped_region = mapped_region,
-		.backend.mtl = { .buffer = buffer, .size = (ulong)desc.size, .shared = shared },
-	};
-}
-
-fn void buffer_deinit_mtl(Buffer* b, Device* device)
-{
-	if (b.backend.mtl.buffer) b.backend.mtl.buffer.release();
-	b.backend.mtl = {};
-}
-
 // ---- dx12 ----
 
 // Direct3D 12 buffer. Port of the `.dx12` arms of rhi-zig's `buffer.zig`
@@ -379,94 +515,6 @@ fn d3d12::HeapType buffer_heap_type_dx12(BufferDesc desc) @private
 			// A persistent mapping needs a CPU-visible heap.
 			return desc.persistent_map ? d3d12::HeapType.UPLOAD : d3d12::HeapType.DEFAULT;
 	}
-}
-
-fn Buffer? buffer_init_general_dx12(Device* device, BufferDesc desc)
-{
-	if (desc.size <= 0) return UNSUPPORTED_FEATURE~;
-	if ((ulong)desc.size > device.adapter.buffer_max_size) return UNSUPPORTED_FEATURE~;
-
-	d3d12::HeapType heap_type = buffer_heap_type_dx12(desc);
-	// UPLOAD heaps must be created GENERIC_READ and READBACK heaps COPY_DEST;
-	// neither can transition.
-	d3d12::ResourceStates initial_state = d3d12::RESOURCE_STATE_COMMON;
-	if (heap_type == d3d12::HeapType.UPLOAD)
-	{
-		initial_state = d3d12::RESOURCE_STATE_GENERIC_READ;
-	}
-	else if (heap_type == d3d12::HeapType.READBACK)
-	{
-		initial_state = d3d12::RESOURCE_STATE_COPY_DEST;
-	}
-	else if (desc.usage.acceleration_structure_storage)
-	{
-		initial_state = d3d12::RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
-	}
-
-	// UAV access is only legal on DEFAULT heap resources.
-	d3d12::ResourceFlags flags = d3d12::RESOURCE_FLAG_NONE;
-	if (heap_type == d3d12::HeapType.DEFAULT
-		&& (desc.usage.shader_resource_storage || desc.usage.scratch_buffer || desc.usage.acceleration_structure_storage))
-	{
-		flags |= d3d12::RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-	}
-
-	d3d12::ResourceDesc resource_desc = {
-		.dimension = d3d12::ResourceDimension.BUFFER,
-		.alignment = 0,
-		.width = (ulong)desc.size,
-		.height = 1,
-		.depth_or_array_size = 1,
-		.mip_levels = 1,
-		.format = dxgi::Format.UNKNOWN,
-		.sample_desc = { .count = 1, .quality = 0 },
-		.layout = d3d12::TextureLayout.ROW_MAJOR,
-		.flags = flags,
-	};
-	d3d12ma::AllocationDesc alloc_desc = { .heap_type = (int)heap_type };
-
-	d3d12ma::Allocation allocation;
-	int hr = d3d12ma::create_resource(device.backend.dx12.allocator, &alloc_desc, &resource_desc, (uint)initial_state, null, &allocation, null);
-	if (hr < 0 || !allocation) return OUT_OF_DEVICE_MEMORY~;
-
-	d3d12::Resource* resource = (d3d12::Resource*)d3d12ma::allocation_get_resource(allocation);
-	void* mapped;
-	char[] mapped_region;
-	if (heap_type != d3d12::HeapType.DEFAULT)
-	{
-		// READBACK is read by the CPU; UPLOAD is write-only (empty read range).
-		ulong read_end = heap_type == d3d12::HeapType.READBACK ? (ulong)desc.size : 0;
-		if (d3d12ma::map(allocation, 0, read_end, &mapped) < 0 || !mapped)
-		{
-			d3d12ma::free_allocation(allocation);
-			return INITIALIZATION_FAILED~;
-		}
-		mapped_region = ((char*)mapped)[:desc.size];
-	}
-	return {
-		.cookie = next_cookie(),
-		.mapped_region = mapped_region,
-		.backend.dx12 = {
-			.allocation = allocation,
-			.resource = resource,
-			.gpu_address = resource.vtbl.get_gpu_virtual_address(resource),
-			.heap_type = heap_type,
-			.initial_state = initial_state,
-			.size = (ulong)desc.size,
-			.mapped = mapped,
-		},
-	};
-}
-
-fn void buffer_deinit_dx12(Buffer* b, Device* device)
-{
-	BufferDx12* state = &b.backend.dx12;
-	if (state.allocation)
-	{
-		if (state.mapped) d3d12ma::unmap(state.allocation, 0, 0);
-		d3d12ma::free_allocation(state.allocation);
-	}
-	*state = {};
 }
 
 // ---- vulkan ----
@@ -534,41 +582,6 @@ fn vma::AllocationCreateInfo buffer_allocation_info_vk(BufferDesc desc) @private
 		info.flags |= vma::ALLOCATION_CREATE_MAPPED_BIT;
 	}
 	return info;
-}
-
-fn Buffer? buffer_init_general_vk(Device* device, BufferDesc desc)
-{
-	if (desc.size <= 0) return UNSUPPORTED_FEATURE~;
-	vk::BufferCreateInfo create_info = {
-		.sType = vk::StructureType.BUFFER_CREATE_INFO,
-		.size = (vk::DeviceSize)desc.size,
-		.usage = buffer_usage_flags_vk(device, desc),
-		.sharingMode = vk::SharingMode.EXCLUSIVE,
-	};
-	vma::AllocationCreateInfo allocation_info = buffer_allocation_info_vk(desc);
-	vk::Buffer buffer;
-	vma::Allocation allocation;
-	vma::AllocationInfo vma_info;
-	vk::Result result = vma::create_buffer(device.backend.vk.vma_allocator, &create_info, &allocation_info, &buffer, &allocation, &vma_info);
-	vk_check(result)!;
-
-	char[] mapped_region;
-	if (vma_info.mapped_data != null) {
-		mapped_region = ((char*)vma_info.mapped_data)[:desc.size];
-	}
-	return {
-		.cookie = next_cookie(),
-		.mapped_region = mapped_region,
-		.backend.vk = { .buffer = buffer, .allocation = allocation, .size = (ulong)desc.size },
-	};
-}
-
-fn void buffer_deinit_vk(Buffer* b, Device* device)
-{
-	if (b.backend.vk.allocation != null) {
-		vma::destroy_buffer(device.backend.vk.vma_allocator, b.backend.vk.buffer, b.backend.vk.allocation);
-	}
-	b.backend.vk = {};
 }
 
 // These helpers are dispatched by the front buffer API. The VMA mapping is

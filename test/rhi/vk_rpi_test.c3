@@ -172,7 +172,7 @@ fn bool program_test_env_init(ProgramTestEnv* env)
 	if (vk::createDebugUtilsMessengerEXT)
 	{
 		vk::DebugUtilsMessengerCreateInfoEXT info = {
-			.sType = vk::StructureType.DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+			.sType = vk::StructureType.vk::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
 			.pfnUserCallback = &program_test_messenger_callback,
 			.pUserData = env,
 			.messageSeverity = vk::DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | vk::DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,

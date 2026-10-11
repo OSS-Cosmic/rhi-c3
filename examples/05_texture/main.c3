@@ -16,14 +16,22 @@ const rhi::Format TEX_FORMAT = rhi::Format.RGBA8_UNORM;
 // The example runner/shader tooling compiles the manifest into these files before checking or building
 // the example.  Vulkan consumes SPIR-V and Metal consumes generated MSL; do
 // not embed the checked-in shader source files here.
+$if rhi::HAS_VK:
 const char[*] TEXTURE_VERTEX_SPV @align(4) = $embed("../../build/examples/05_texture/shaders/05_texture.vert.spv");
 const char[*] TEXTURE_FRAGMENT_SPV @align(4) = $embed("../../build/examples/05_texture/shaders/05_texture.frag.spv");
+$endif
+$if rhi::HAS_MTL:
 const char[*] TEXTURE_VERTEX_MSL = $embed("../../build/examples/05_texture/shaders/05_texture.vert.metal");
 const char[*] TEXTURE_FRAGMENT_MSL = $embed("../../build/examples/05_texture/shaders/05_texture.frag.metal");
+$endif
+$if rhi::HAS_WGPU:
 const char[*] TEXTURE_VERTEX_WGSL = $embed("../../build/examples/05_texture/shaders/05_texture.vert.wgsl");
 const char[*] TEXTURE_FRAGMENT_WGSL = $embed("../../build/examples/05_texture/shaders/05_texture.frag.wgsl");
+$endif
+$if rhi::HAS_WEBGL:
 const char[*] TEXTURE_VERTEX_GLSL = $embed("../../build/examples/05_texture/shaders/05_texture.vert.glsl");
 const char[*] TEXTURE_FRAGMENT_GLSL = $embed("../../build/examples/05_texture/shaders/05_texture.frag.glsl");
+$endif
 
 struct TextureVertex
 {
@@ -281,31 +289,36 @@ fn rhi::ShaderGraphicsOptions texture_shader_stages()
 	String fragment_entry;
 	switch (rhi::renderer.backend)
 	{
+		$if rhi::HAS_MTL:
 		case rhi::Backend.MTL:
 			vertex_data = TEXTURE_VERTEX_MSL[..];
 			fragment_data = TEXTURE_FRAGMENT_MSL[..];
 			vertex_entry = "vertexMain";
 			fragment_entry = "fragmentMain";
+		$endif
+		$if rhi::HAS_VK:
 		case rhi::Backend.VK:
 			vertex_data = TEXTURE_VERTEX_SPV[..];
 			fragment_data = TEXTURE_FRAGMENT_SPV[..];
 			vertex_entry = "main";
 			fragment_entry = "main";
+		$endif
+		$if rhi::HAS_WGPU:
 		case rhi::Backend.WGPU:
 			vertex_data = TEXTURE_VERTEX_WGSL[..];
 			fragment_data = TEXTURE_FRAGMENT_WGSL[..];
 			vertex_entry = "vertexMain";
 			fragment_entry = "fragmentMain";
+		$endif
+		$if rhi::HAS_WEBGL:
 		case rhi::Backend.WEBGL:
 			vertex_data = TEXTURE_VERTEX_GLSL[..];
 			fragment_data = TEXTURE_FRAGMENT_GLSL[..];
 			vertex_entry = "main";
 			fragment_entry = "main";
+		$endif
 		default:
-			vertex_data = TEXTURE_VERTEX_SPV[..];
-			fragment_data = TEXTURE_FRAGMENT_SPV[..];
-			vertex_entry = "main";
-			fragment_entry = "main";
+			return {};
 	}
 	return {
 		.vertex_stage = { .data = vertex_data, .entry_point = vertex_entry },
@@ -418,10 +431,10 @@ fn void? texture_frame()
 			.store_op = rhi::StoreOp.STORE,
 			.clear_color = { 0.05, 0.35, 0.15, 1 },
 		}},
-		.render_area = { .width = width, .height = height },
+		.render_area = { .width = (float)width, .height = (float)height },
 	});
 	rhi::cmd_set_viewport(cmd, &state.device, { .width = (float)width, .height = (float)height, .min_depth = 0, .max_depth = 1 });
-	rhi::cmd_set_scissor(cmd, &state.device, { .width = width, .height = height });
+	rhi::cmd_set_scissor(cmd, &state.device, { .width = (float)width, .height = (float)height });
 	rhi::cmd_bind_pipeline(cmd, &state.device, &state.pipeline);
 	if (catch err = rhi::cmd_bind_descriptors(cmd, &state.device, &state.pipeline, {
 		rhi::descriptor_binding("tex", rhi::descriptor_sampled_image(&state.view), 0),

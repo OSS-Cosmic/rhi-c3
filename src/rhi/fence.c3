@@ -10,6 +10,7 @@
 // objects until the commands referencing them retire). A fence therefore has
 // nothing to carry and nothing to wait on.
 module rhi;
+import d3d12, dxgi, mtl, vk;
 
 struct FenceWgpu { char _unused; }
 struct FenceWebgl { char _unused; }
@@ -38,22 +39,44 @@ fn Fence? fence_init(Device* device, bool signaled)
 	{
 		case VK:
 			$if HAS_VK:
-				return fence_init_vk(device, signaled);
+				{
+					vk::FenceCreateFlags flags;
+					if (signaled) flags = vk::FENCE_CREATE_SIGNALED_BIT;
+					vk::FenceCreateInfo create_info = {
+						.sType = FENCE_CREATE_INFO,
+						.flags = flags,
+					};
+					vk::Fence fence;
+					vk_check(device.backend.vk.vtable.createFence(device.backend.vk.device, &create_info, null, &fence))!;
+					return { .backend.vk = { .fence = fence } };
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				return fence_init_dx12(device, signaled);
+				{
+					ulong armed = 1;
+					d3d12::Fence* fence;
+					dxgi::Handle event;
+					dx12_fence_create(device, signaled ? armed : 0, &fence, &event)!;
+					return { .backend.dx12 = { .fence = fence, .event = event, .armed = armed } };
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				return fence_init_mtl(device, signaled);
+				{
+					ulong armed = 1;
+					mtl::SharedEvent event = device.backend.mtl.device.new_shared_event();
+					if (!event) return INITIALIZATION_FAILED~;
+					if (signaled) event.set_signaled_value(armed);
+					return { .backend.mtl = { .event = event, .armed = armed } };
+				}
 			$endif
 		case WGPU:
 		case WEBGL:
 			// Nothing to create; see the file header.
 			return {};
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void fence_deinit(Fence* f, Device* device)
@@ -100,7 +123,7 @@ fn void? fence_wait(Device* device, Fence*[] fences)
 			// later submits after earlier ones.
 			return;
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn FenceStatus? fence_status(Fence* f, Device* device)
@@ -125,7 +148,7 @@ fn FenceStatus? fence_status(Fence* f, Device* device)
 			// to treat as complete. Use a `Timeline` to observe real progress.
 			return COMPLETE;
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 // ---- metal ----
@@ -142,15 +165,6 @@ struct FenceMtl
 {
 	mtl::SharedEvent event;
 	ulong armed;
-}
-
-fn Fence? fence_init_mtl(Device* device, bool signaled)
-{
-	ulong armed = 1;
-	mtl::SharedEvent event = device.backend.mtl.device.new_shared_event();
-	if (!event) return INITIALIZATION_FAILED~;
-	if (signaled) event.set_signaled_value(armed);
-	return { .backend.mtl = { .event = event, .armed = armed } };
 }
 
 fn void fence_deinit_mtl(Fence* f, Device* device)
@@ -220,15 +234,6 @@ fn void? dx12_fence_wait(d3d12::Fence* fence, dxgi::Handle event, ulong value)
 	if (d3d12::wait_for_single_object(event, d3d12::INFINITE) != d3d12::WAIT_OBJECT_0) return UNKNOWN~;
 }
 
-fn Fence? fence_init_dx12(Device* device, bool signaled)
-{
-	ulong armed = 1;
-	d3d12::Fence* fence;
-	dxgi::Handle event;
-	dx12_fence_create(device, signaled ? armed : 0, &fence, &event)!;
-	return { .backend.dx12 = { .fence = fence, .event = event, .armed = armed } };
-}
-
 fn void fence_deinit_dx12(Fence* f, Device* device)
 {
 	dx12_fence_destroy(f.backend.dx12.fence, f.backend.dx12.event);
@@ -258,23 +263,10 @@ struct FenceVk
 	vk::Fence fence;
 }
 
-fn Fence? fence_init_vk(Device* device, bool signaled)
-{
-	vk::FenceCreateFlags flags;
-	if (signaled) flags = vk::FENCE_CREATE_SIGNALED_BIT;
-	vk::FenceCreateInfo create_info = {
-		.sType = FENCE_CREATE_INFO,
-		.flags = flags,
-	};
-	vk::Fence fence;
-	vk_check(device.backend.vk.vtable.createFence(device.backend.vk.device, &create_info, null, &fence))!;
-	return { .backend.vk = { .fence = fence } };
-}
-
 fn void fence_deinit_vk(Fence* f, Device* device)
 {
 	device.backend.vk.vtable.destroyFence(device.backend.vk.device, f.backend.vk.fence, null);
-	f.backend.vk.fence = 0;
+	f.backend.vk.fence = (vk::Fence)0;
 }
 
 fn void? fence_wait_vk(Device* device, Fence*[] fences)

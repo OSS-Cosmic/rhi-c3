@@ -1,17 +1,17 @@
 // Copyright 2026 Michael Pollind
 // SPDX-License-Identifier: GPL-2.0-only
 
-// 03_imgui: Vulkan ImGui demo.
+// 03_imgui: RHI ImGui demo.
 //
 // The ImGui renderer and its embedded shaders live in rhi::imgui. This file
 // owns only the example lifecycle and the SDL -> ImGui input translation.
-module example_03_imgui @feat(RHI_VK & RHI_IMGUI & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
+module example_03_imgui @feat((RHI_VK & (LINUX | WIN32) | RHI_MTL & DARWIN) & RHI_IMGUI & !RHI_HEADLESS & !WASM);
 
 import std::collections::list;
 import imgui;
 import platform;
 import rhi;
-import sdl3;
+import sdl3_compat;
 
 const uint FRAMES_IN_FLIGHT = 3;
 
@@ -39,6 +39,7 @@ struct ImguiState
 	float frame_dt;
 	bool force_rebuild;
 	bool invalid_args;
+	bool text_input_started;
 	uint frame_limit;
 	uint presented;
 }
@@ -144,13 +145,13 @@ fn int imgui_key_from_scancode(uint scancode)
 
 fn void imgui_forward_modifiers(ushort modifiers, bool down)
 {
-	if ((modifiers & (sdl3::SDL_KMOD_LCTRL | sdl3::SDL_KMOD_RCTRL)) != 0) rhi::imgui_layer_add_key_event(&state.imgui, IMGUI_MOD_CTRL, down);
-	if ((modifiers & (sdl3::SDL_KMOD_LSHIFT | sdl3::SDL_KMOD_RSHIFT)) != 0) rhi::imgui_layer_add_key_event(&state.imgui, IMGUI_MOD_SHIFT, down);
-	if ((modifiers & (sdl3::SDL_KMOD_LALT | sdl3::SDL_KMOD_RALT)) != 0) rhi::imgui_layer_add_key_event(&state.imgui, IMGUI_MOD_ALT, down);
-	if ((modifiers & (sdl3::SDL_KMOD_LGUI | sdl3::SDL_KMOD_RGUI)) != 0) rhi::imgui_layer_add_key_event(&state.imgui, IMGUI_MOD_SUPER, down);
+	if ((modifiers & (sdl3_compat::SDL_KMOD_LCTRL | sdl3_compat::SDL_KMOD_RCTRL)) != 0) rhi::imgui_layer_add_key_event(&state.imgui, IMGUI_MOD_CTRL, down);
+	if ((modifiers & (sdl3_compat::SDL_KMOD_LSHIFT | sdl3_compat::SDL_KMOD_RSHIFT)) != 0) rhi::imgui_layer_add_key_event(&state.imgui, IMGUI_MOD_SHIFT, down);
+	if ((modifiers & (sdl3_compat::SDL_KMOD_LALT | sdl3_compat::SDL_KMOD_RALT)) != 0) rhi::imgui_layer_add_key_event(&state.imgui, IMGUI_MOD_ALT, down);
+	if ((modifiers & (sdl3_compat::SDL_KMOD_LGUI | sdl3_compat::SDL_KMOD_RGUI)) != 0) rhi::imgui_layer_add_key_event(&state.imgui, IMGUI_MOD_SUPER, down);
 }
 
-fn void imgui_forward_utf8(sdl3::TextInputEvent* event)
+fn void imgui_forward_utf8(sdl3_compat::TextInputEvent* event)
 {
 	uint offset = 0;
 	while (offset < (uint)event.text.len && event.text[offset] != 0)
@@ -182,7 +183,7 @@ fn void imgui_draw_status()
 {
 	if (imgui::begin("rhi", null, 0))
 	{
-		imgui::text("Dear ImGui on the RHI (Vulkan backend)");
+		imgui::text("Dear ImGui on the RHI");
 		float fps = state.frame_dt > 0 ? 1.0 / state.frame_dt : 0;
 		imgui::text("FPS: %.1f", fps);
 		imgui::text("Frames presented: %d", (int)state.presented);
@@ -193,7 +194,11 @@ fn void imgui_draw_status()
 fn void? imgui_init(platform::Window window)
 {
 	state.window = window;
-	if (catch err = rhi::renderer_init({ .backend = rhi::Backend.VK, .vk = { .app_name = "03_imgui" } })) return err~;
+	if (rhi::platform_has_api(rhi::Backend.MTL))
+	{
+		if (catch err = rhi::renderer_init({ .backend = rhi::Backend.MTL })) return err~;
+	}
+	else if (catch err = rhi::renderer_init({ .backend = rhi::Backend.VK, .vk = { .app_name = "03_imgui" } })) return err~;
 	state.stage = ImguiStage.RENDERER;
 	List{rhi::PhysicalAdapter}? adapters = rhi::enumerate_adapters();
 	if (catch err = adapters) return err~;
@@ -219,6 +224,8 @@ fn void? imgui_init(platform::Window window)
 	state.stage = ImguiStage.TIMELINE;
 	state.imgui = rhi::imgui_layer_init(&state.device, rhi::swapchain_color_format(&state.swapchain))!;
 	state.stage = ImguiStage.IMGUI;
+	state.text_input_started = sdl3_compat::start_text_input(window.handle);
+	if (!state.text_input_started) log::warn("[03_imgui] SDL text input unavailable: %s", sdl3_compat::get_error());
 	state.last_ticks = platform::ticks_ms();
 	state.frame_dt = 1.0 / 60;
 	state.force_rebuild = false;
@@ -236,7 +243,7 @@ fn platform::AppResult imgui_app_init(platform::Window window)
 	}
 	if (catch imgui_init(window))
 	{
-		log::error("[03_imgui] Vulkan/ImGui initialization failed");
+		log::error("[03_imgui] RHI/ImGui initialization failed");
 		return platform::AppResult.FAILURE;
 	}
 	return platform::AppResult.CONTINUE;
@@ -266,7 +273,11 @@ fn void? imgui_frame()
 	ulong now = platform::ticks_ms();
 	state.frame_dt = state.last_ticks == 0 ? (float)(1.0 / 60) : (float)(now - state.last_ticks) / 1000;
 	state.last_ticks = now;
-	rhi::imgui_layer_new_frame(&state.imgui, width, height, state.frame_dt);
+	platform::PixelSize point_size = platform::window_size_in_points(state.window);
+	float point_width = point_size.width == 0 ? (float)width : (float)point_size.width;
+	float point_height = point_size.height == 0 ? (float)height : (float)point_size.height;
+	rhi::imgui_layer_new_frame(&state.imgui, point_width, point_height, state.frame_dt,
+		(float)size.width / point_width, (float)size.height / point_height);
 	imgui::show_demo_window(null);
 	imgui_draw_status();
 
@@ -292,7 +303,7 @@ fn void? imgui_frame()
 			.store_op = rhi::StoreOp.STORE,
 			.clear_color = { 0.1, 0.1, 0.12, 1.0 },
 		}},
-		.render_area = { .width = width, .height = height },
+		.render_area = { .width = (float)width, .height = (float)height },
 	});
 	rhi::imgui_layer_render(&state.imgui, &state.device, cmd)!;
 	rhi::cmd_end_rendering(cmd, &state.device);
@@ -333,33 +344,33 @@ fn platform::AppResult imgui_event(platform::Event* event)
 {
 	uint type = event.common.type;
 	if (state.stage < ImguiStage.IMGUI) return platform::AppResult.CONTINUE;
-	if (type == sdl3::SDL_EVENT_MOUSE_MOTION)
+	if (type == sdl3_compat::SDL_EVENT_MOUSE_MOTION)
 	{
-		sdl3::MouseMotionEvent* motion = (sdl3::MouseMotionEvent*)event;
+		sdl3_compat::MouseMotionEvent* motion = (sdl3_compat::MouseMotionEvent*)event;
 		rhi::imgui_layer_add_mouse_pos_event(&state.imgui, motion.x, motion.y);
 	}
-	else if (type == sdl3::SDL_EVENT_MOUSE_WHEEL)
+	else if (type == sdl3_compat::SDL_EVENT_MOUSE_WHEEL)
 	{
-		sdl3::MouseWheelEvent* wheel = (sdl3::MouseWheelEvent*)event;
+		sdl3_compat::MouseWheelEvent* wheel = (sdl3_compat::MouseWheelEvent*)event;
 		rhi::imgui_layer_add_mouse_wheel_event(&state.imgui, wheel.x, wheel.y);
 	}
-	else if (type == sdl3::SDL_EVENT_MOUSE_BUTTON_DOWN || type == sdl3::SDL_EVENT_MOUSE_BUTTON_UP)
+	else if (type == sdl3_compat::SDL_EVENT_MOUSE_BUTTON_DOWN || type == sdl3_compat::SDL_EVENT_MOUSE_BUTTON_UP)
 	{
-		sdl3::MouseButtonEvent* button = (sdl3::MouseButtonEvent*)event;
-		int mapped = button.button == sdl3::SDL_BUTTON_LEFT ? 0 : button.button == sdl3::SDL_BUTTON_RIGHT ? 1 : button.button == sdl3::SDL_BUTTON_MIDDLE ? 2 : -1;
-		if (mapped >= 0) rhi::imgui_layer_add_mouse_button_event(&state.imgui, mapped, type == sdl3::SDL_EVENT_MOUSE_BUTTON_DOWN);
+		sdl3_compat::MouseButtonEvent* button = (sdl3_compat::MouseButtonEvent*)event;
+		int mapped = button.button == sdl3_compat::SDL_BUTTON_LEFT ? 0 : button.button == sdl3_compat::SDL_BUTTON_RIGHT ? 1 : button.button == sdl3_compat::SDL_BUTTON_MIDDLE ? 2 : -1;
+		if (mapped >= 0) rhi::imgui_layer_add_mouse_button_event(&state.imgui, mapped, type == sdl3_compat::SDL_EVENT_MOUSE_BUTTON_DOWN);
 	}
-	else if (type == sdl3::SDL_EVENT_KEY_DOWN || type == sdl3::SDL_EVENT_KEY_UP)
+	else if (type == sdl3_compat::SDL_EVENT_KEY_DOWN || type == sdl3_compat::SDL_EVENT_KEY_UP)
 	{
-		sdl3::KeyboardEvent* key = (sdl3::KeyboardEvent*)event;
-		bool down = type == sdl3::SDL_EVENT_KEY_DOWN;
+		sdl3_compat::KeyboardEvent* key = (sdl3_compat::KeyboardEvent*)event;
+		bool down = type == sdl3_compat::SDL_EVENT_KEY_DOWN;
 		int imgui_key = imgui_key_from_scancode(key.scancode);
 		if (imgui_key >= 0) rhi::imgui_layer_add_key_event(&state.imgui, imgui_key, down);
 		imgui_forward_modifiers(key.modifiers, down);
 	}
-	else if (type == sdl3::SDL_EVENT_TEXT_INPUT)
+	else if (type == sdl3_compat::SDL_EVENT_TEXT_INPUT)
 	{
-		imgui_forward_utf8((sdl3::TextInputEvent*)event);
+		imgui_forward_utf8((sdl3_compat::TextInputEvent*)event);
 	}
 	return platform::AppResult.CONTINUE;
 }
@@ -367,6 +378,7 @@ fn platform::AppResult imgui_event(platform::Event* event)
 fn void imgui_app_quit(platform::AppResult result)
 {
 	(void)result;
+	if (state.text_input_started) (void)sdl3_compat::stop_text_input(state.window.handle);
 	if (state.stage >= ImguiStage.DEVICE) (void)rhi::queue_wait_idle(&state.device.graphics_queue, &state.device);
 	if (state.stage >= ImguiStage.IMGUI) rhi::imgui_layer_deinit(&state.imgui, &state.device);
 	if (state.stage >= ImguiStage.TIMELINE) rhi::timeline_deinit(&state.timeline, &state.device);

@@ -7,7 +7,9 @@
 // ring types (`Pool`, `CommandRingElement`, `CommandRingBuffer`) live in
 // pool.c3 and cmd_ring.c3.
 module rhi;
-import mtl;
+import d3d12, dxgi, mtl, vk;
+import std::math::geometry;
+import std::os::macos::objc;
 
 struct Cmd
 {
@@ -22,14 +24,6 @@ struct Cmd
 	// Filled at `cmd_init`; every barrier recorded on this command buffer
 	// translates against it.
 	BarrierCapabilities barrier_capabilities;
-}
-
-struct Rect
-{
-	int x;
-	int y;
-	uint width;
-	uint height;
 }
 
 // `min_depth`/`max_depth` have no meaningful zero-value default (Vulkan wants
@@ -60,7 +54,7 @@ struct Viewport
 struct CmdClearRegion
 {
 	float[4] color;
-	Rect rect;
+	std::math::geometry::Rect rect;
 }
 
 fn Cmd? cmd_init(Device* device, Pool* pool)
@@ -69,7 +63,15 @@ fn Cmd? cmd_init(Device* device, Pool* pool)
 	{
 		case VK:
 			$if HAS_VK:
-				Cmd c = cmd_init_vk(device, pool)!;
+				vk::CommandBufferAllocateInfo info = {
+					.sType = vk::StructureType.COMMAND_BUFFER_ALLOCATE_INFO,
+					.commandPool = pool.backend.vk.pool,
+					.level = vk::CommandBufferLevel.PRIMARY,
+					.commandBufferCount = 1,
+				};
+				vk::CommandBuffer command_buffer;
+				vk_check(device.backend.vk.vtable.allocateCommandBuffers(device.backend.vk.device, &info, &command_buffer))!;
+				Cmd c = { .backend.vk = { .cmd = command_buffer } };
 				// The Vulkan device does not track ray-tracing pipeline or
 				// acceleration-structure features yet, so both stay off and
 				// ray-tracing stages drop out of derived barrier masks, as HPL2
@@ -79,22 +81,48 @@ fn Cmd? cmd_init(Device* device, Pool* pool)
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				return cmd_init_dx12(device, pool);
+				{
+					d3d12::Device* dev = device.backend.dx12.device;
+					d3d12::CommandAllocator* allocator = pool.backend.dx12.allocator;
+					if (!dev || !allocator) return INITIALIZATION_FAILED~;
+
+					Guid iid = d3d12::IID_GRAPHICS_COMMAND_LIST;
+					d3d12::GraphicsCommandList* list;
+					dx12_check(dev.vtbl.create_command_list(dev, 0, pool.backend.dx12.type, allocator, null, &iid, (void**)&list))!;
+					// CreateCommandList returns the list open; close it so the first
+					// `cmd_begin_dx12` can Reset it like every later one.
+					if (dxgi::failed(list.vtbl.close(list)))
+					{
+						dxgi::release(list);
+						return INITIALIZATION_FAILED~;
+					}
+					return { .backend.dx12 = { .list = list, .allocator = allocator } };
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				return cmd_init_mtl(device, pool);
+				{
+					return { .backend.mtl = { .queue = device.backend.mtl.queue } };
+				}
 			$endif
 		case WGPU:
 			$if HAS_WGPU:
-				return cmd_init_wgpu(device, pool);
+				{
+					if (device == null || device.backend.wgpu.device == 0) return INITIALIZATION_FAILED~;
+					return { .backend.wgpu = { .device = device.backend.wgpu.device } };
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				return cmd_init_webgl(device, pool);
+				{
+					if (device == null || pool == null) return INITIALIZATION_FAILED~;
+					WebglCommand[] commands = alloc::alloc_array_try(device.allocator, WebglCommand, WEBGL_MAX_COMMANDS)!;
+					commands[..] = {};
+					return { .barrier_capabilities = {}, .backend.webgl = { .commands = commands } };
+				}
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void cmd_deinit(Cmd* c, Device* device, Pool* pool)
@@ -103,24 +131,53 @@ fn void cmd_deinit(Cmd* c, Device* device, Pool* pool)
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_deinit_vk(c, device, pool);
+				{
+					Cmd* cmd = c;
+					device.backend.vk.vtable.freeCommandBuffers(device.backend.vk.device, pool.backend.vk.pool, 1, &cmd.backend.vk.cmd);
+					cmd.backend.vk = {};
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_deinit_dx12(c, device, pool);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					(void)pool;
+					CmdDx12* state = &cmd.backend.dx12;
+					if (state.list) dxgi::release(state.list);
+					*state = {};
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_deinit_mtl(c, device, pool);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					mtl_finish_render(state);
+					mtl_finish_blit(state);
+					if (state.command_buffer) state.command_buffer.release();
+					*state = {};
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_deinit_wgpu(c, device, pool);
+				{
+					CmdWgpu* s = &c.backend.wgpu;
+					if (s.pass != 0) { wgpu_render_pass_end(s.pass); s.pass = 0; }
+					wgpu_release_if(&s.command_buffer);
+					wgpu_release_if(&s.encoder);
+					wgpu_release_if(&s.texture_bind_group);
+					s.pipeline = 0;
+					s.push_constant_group = 0;
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_deinit_webgl(c, device, pool);
+				{
+					if (c == null) return;
+					if (c.backend.webgl.commands.ptr != null) alloc::free(device.allocator, c.backend.webgl.commands.ptr);
+					c.backend.webgl = {};
+				}
 			$endif
 	}
 }
@@ -131,26 +188,63 @@ fn void? cmd_begin(Cmd* c, Device* device)
 	{
 		case VK:
 			$if HAS_VK:
-				return cmd_begin_vk(c, device);
+				{
+					Cmd* cmd = c;
+					vk::CommandBufferBeginInfo info = {
+						.sType = vk::StructureType.COMMAND_BUFFER_BEGIN_INFO,
+						.flags = vk::COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+					};
+					return vk_check(device.backend.vk.vtable.beginCommandBuffer(cmd.backend.vk.cmd, &info));
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				return cmd_begin_dx12(c, device);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					CmdDx12* state = &cmd.backend.dx12;
+					if (!state.list || !state.allocator) return UNKNOWN~;
+					dx12_check(state.list.vtbl.reset(state.list, state.allocator, null))!;
+					state.rtv_count = 0;
+					state.has_dsv = false;
+					state.vertex_stride = 0;
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				return cmd_begin_mtl(c, device);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					mtl_finish_render(state);
+					mtl_finish_blit(state);
+					if (state.command_buffer) state.command_buffer.release();
+					state.command_buffer = state.queue.command_buffer();
+					if (!state.command_buffer) return INITIALIZATION_FAILED~;
+					state.command_buffer.retain();
+					state.index_buffer = null;
+					state.index_offset = 0;
+					state.render_active = false;
+					state.blit_active = false;
+					return;
+				}
 			$endif
 		case WGPU:
 			$if HAS_WGPU:
-				return cmd_begin_wgpu(c, device);
+				{
+					CmdWgpu* s = &c.backend.wgpu;
+					if (s.encoder != 0) return UNKNOWN~;
+					s.encoder = wgpu_device_create_command_encoder(s.device);
+					if (s.encoder == 0) return OUT_OF_DEVICE_MEMORY~;
+					return;
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				return cmd_begin_webgl(c, device);
+				{
+					 if (c == null) return INITIALIZATION_FAILED~; c.backend.webgl.command_count = 0; return;
+				}
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void? cmd_end(Cmd* c, Device* device)
@@ -159,26 +253,51 @@ fn void? cmd_end(Cmd* c, Device* device)
 	{
 		case VK:
 			$if HAS_VK:
-				return cmd_end_vk(c, device);
+				{
+					Cmd* cmd = c;
+					return vk_check(device.backend.vk.vtable.endCommandBuffer(cmd.backend.vk.cmd));
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				return cmd_end_dx12(c, device);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					CmdDx12* state = &cmd.backend.dx12;
+					if (!state.list) return UNKNOWN~;
+					dx12_check(state.list.vtbl.close(state.list))!;
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				return cmd_end_mtl(c, device);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					mtl_finish_render(state);
+					mtl_finish_blit(state);
+					return;
+				}
 			$endif
 		case WGPU:
 			$if HAS_WGPU:
-				return cmd_end_wgpu(c, device);
+				{
+					CmdWgpu* s = &c.backend.wgpu;
+					if (s.pass != 0) { wgpu_render_pass_end(s.pass); s.pass = 0; }
+					if (s.encoder == 0) return UNKNOWN~;
+					wgpu_release_if(&s.command_buffer);
+					s.command_buffer = wgpu_command_encoder_finish(s.encoder);
+					wgpu_release_if(&s.encoder);
+					if (s.command_buffer == 0) return UNKNOWN~;
+					return;
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				return cmd_end_webgl(c, device);
+				{
+					 if (c == null) return INITIALIZATION_FAILED~; return;
+				}
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 fn void cmd_set_viewport(Cmd* c, Device* device, Viewport vp)
@@ -187,52 +306,124 @@ fn void cmd_set_viewport(Cmd* c, Device* device, Viewport vp)
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_set_viewport_vk(c, device, vp);
+				{
+					Cmd* cmd = c;
+					Viewport viewport = vp;
+					(void)device;
+					vk::Viewport vk_viewport = {
+						.x = viewport.x,
+						.y = viewport.y,
+						.width = viewport.width,
+						.height = viewport.height,
+						.minDepth = viewport.min_depth,
+						.maxDepth = viewport.max_depth,
+					};
+					device.backend.vk.vtable.cmdSetViewport(cmd.backend.vk.cmd, 0, 1, &vk_viewport);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_set_viewport_dx12(c, device, vp);
+				{
+					Cmd* cmd = c;
+					Viewport viewport = vp;
+					(void)device;
+					assert(!viewport.origin_bottom_left, "D3D12 does not support bottom-left origin viewports");
+					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
+					float y = viewport.y;
+					float height = viewport.height;
+					if (height < 0)
+					{
+						y += height;
+						height = -height;
+					}
+					d3d12::Viewport vp = {
+						.top_left_x = viewport.x,
+						.top_left_y = y,
+						.width = viewport.width,
+						.height = height,
+						.min_depth = viewport.min_depth,
+						.max_depth = viewport.max_depth,
+					};
+					list.vtbl.rs_set_viewports(list, 1, &vp);
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_set_viewport_mtl(c, device, vp);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(state.render_encoder, "graphics command requires an active render pass");
+					state.render_encoder.set_viewport({
+						.origin_x = vp.x, .origin_y = vp.y, .width = vp.width, .height = vp.height,
+						.znear = vp.min_depth, .zfar = vp.max_depth,
+					});
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_set_viewport_wgpu(c, device, vp);
+				{
+					assert(c.backend.wgpu.pass != 0, "viewport requires an active render pass");
+					wgpu_render_pass_set_viewport(c.backend.wgpu.pass, vp.x, vp.y, vp.width, vp.height, vp.min_depth, vp.max_depth);
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_set_viewport_webgl(c, device, vp);
+				{
+					 WebglCommand* x = webgl_push(c, VIEWPORT); if (x != null) x.viewport = vp;
+				}
 			$endif
 	}
 }
 
-fn void cmd_set_scissor(Cmd* c, Device* device, Rect rect)
+fn void cmd_set_scissor(Cmd* c, Device* device, std::math::geometry::Rect rect)
 {
 	switch (renderer.backend)
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_set_scissor_vk(c, device, rect);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					vk::Rect2D scissor = {
+						.offset = { .x = (int)rect.x, .y = (int)rect.y },
+						.extent = { .width = (uint)rect.width, .height = (uint)rect.height },
+					};
+					device.backend.vk.vtable.cmdSetScissor(cmd.backend.vk.cmd, 0, 1, &scissor);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_set_scissor_dx12(c, device, rect);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
+					d3d12::Rect scissor = dx12_rect(rect);
+					list.vtbl.rs_set_scissor_rects(list, 1, &scissor);
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_set_scissor_mtl(c, device, rect);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(state.render_encoder, "graphics command requires an active render pass");
+					assert(rect.x >= 0 && rect.y >= 0, "scissor coordinates must be nonnegative");
+					state.render_encoder.set_scissor_rect({ .x = (mtl::NSUInteger)rect.x, .y = (mtl::NSUInteger)rect.y, .width = (mtl::NSUInteger)rect.width, .height = (mtl::NSUInteger)rect.height });
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_set_scissor_wgpu(c, device, rect);
+				{
+					assert(c.backend.wgpu.pass != 0, "scissor requires an active render pass");
+					assert(rect.x >= 0 && rect.y >= 0, "scissor coordinates must be nonnegative");
+					wgpu_render_pass_set_scissor_rect(c.backend.wgpu.pass, (uint)rect.x, (uint)rect.y, rect.width, rect.height);
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_set_scissor_webgl(c, device, rect);
+				{
+					 WebglCommand* x = webgl_push(c, SCISSOR); if (x != null) x.rect = rect;
+				}
 			$endif
 	}
 }
@@ -243,24 +434,42 @@ fn void cmd_draw(Cmd* c, Device* device, uint vertex_count, uint instance_count 
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_draw_vk(c, device, vertex_count, instance_count, first_vertex, first_instance);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					device.backend.vk.vtable.cmdDraw(cmd.backend.vk.cmd, vertex_count, instance_count, first_vertex, first_instance);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_draw_dx12(c, device, vertex_count, instance_count, first_vertex, first_instance);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
+					list.vtbl.draw_instanced(list, vertex_count, instance_count, first_vertex, first_instance);
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_draw_mtl(c, device, vertex_count, instance_count, first_vertex, first_instance);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(state.render_encoder, "graphics command requires an active render pass");
+					state.render_encoder.draw_primitives_instanced(state.primitive_type, first_vertex, vertex_count, instance_count, first_instance);
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_draw_wgpu(c, device, vertex_count, instance_count, first_vertex, first_instance);
+				{
+					assert(c.backend.wgpu.pass != 0, "draw requires an active render pass");
+					wgpu_render_pass_draw(c.backend.wgpu.pass, vertex_count, instance_count, first_vertex, first_instance);
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_draw_webgl(c, device, vertex_count, instance_count, first_vertex, first_instance);
+				{
+					 WebglCommand* x = webgl_push(c, DRAW); if (x != null) { x.count = vertex_count; x.instance_count = instance_count; x.first = first_vertex; }
+				}
 			$endif
 	}
 }
@@ -271,24 +480,45 @@ fn void cmd_draw_indexed(Cmd* c, Device* device, uint index_count, uint instance
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_draw_indexed_vk(c, device, index_count, instance_count, first_index, vertex_offset, first_instance);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					device.backend.vk.vtable.cmdDrawIndexed(cmd.backend.vk.cmd, index_count, instance_count, first_index, vertex_offset, first_instance);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_draw_indexed_dx12(c, device, index_count, instance_count, first_index, vertex_offset, first_instance);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
+					list.vtbl.draw_indexed_instanced(list, index_count, instance_count, first_index, vertex_offset, first_instance);
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_draw_indexed_mtl(c, device, index_count, instance_count, first_index, vertex_offset, first_instance);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(state.render_encoder, "graphics command requires an active render pass");
+					assert(state.index_buffer, "indexed draw requires an index buffer");
+					uint index_size = state.index_type == mtl::IndexType.UINT16 ? 2 : 4;
+					ulong byte_offset = state.index_offset + (ulong)first_index * index_size;
+					state.render_encoder.draw_indexed_primitives_instanced(state.primitive_type, index_count, state.index_type, state.index_buffer, byte_offset, instance_count, vertex_offset, first_instance);
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_draw_indexed_wgpu(c, device, index_count, instance_count, first_index, vertex_offset, first_instance);
+				{
+					assert(c.backend.wgpu.pass != 0, "indexed draw requires an active render pass");
+					wgpu_render_pass_draw_indexed(c.backend.wgpu.pass, index_count, instance_count, first_index, vertex_offset, first_instance);
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_draw_indexed_webgl(c, device, index_count, instance_count, first_index, vertex_offset, first_instance);
+				{
+					 WebglCommand* x = webgl_push(c, DRAW_INDEXED); if (x != null) { x.count = index_count; x.instance_count = instance_count; x.first = first_index; x.vertex_offset = vertex_offset; }
+				}
 			$endif
 	}
 }
@@ -302,24 +532,58 @@ fn void cmd_draw_indirect(Cmd* c, Device* device, Buffer* buffer, ulong offset, 
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_draw_indirect_vk(c, device, buffer, offset, draw_count, stride);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					device.backend.vk.vtable.cmdDrawIndirect(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, draw_count, stride);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_draw_indirect_dx12(c, device, buffer, offset, draw_count, stride);
+				{
+					Cmd* cmd = c;
+					assert(buffer != null && buffer.backend.dx12.resource, "indirect draw requires an initialized argument buffer");
+					if (draw_count == 0) return;
+					d3d12::CommandSignature* signature = dx12_draw_signature(device, false);
+					assert(signature, "failed to create D3D12 draw command signature");
+					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
+					uint natural = DX12_DRAW_ARGS_STRIDE;
+					if (stride == 0 || stride == natural)
+					{
+						list.vtbl.execute_indirect(list, signature, draw_count, buffer.backend.dx12.resource, offset, null, 0);
+						return;
+					}
+					for (uint i = 0; i < draw_count; i++)
+					{
+						list.vtbl.execute_indirect(list, signature, 1, buffer.backend.dx12.resource, offset + (ulong)i * stride, null, 0);
+					}
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_draw_indirect_mtl(c, device, buffer, offset, draw_count, stride);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(state.render_encoder, "graphics command requires an active render pass");
+					assert(buffer != null && buffer.backend.mtl.buffer, "indirect draw requires a valid argument buffer");
+					uint draw_stride = stride == 0 ? MTL_DRAW_PRIMITIVE_STRIDE : stride;
+					for (uint i = 0; i < draw_count; i++)
+					{
+						state.render_encoder.draw_primitives_indirect(state.primitive_type, buffer.backend.mtl.buffer, offset + (ulong)i * draw_stride);
+					}
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_draw_indirect_wgpu(c, device, buffer, offset, draw_count, stride);
+				{
+					 wgpu_log_text("WebGPU: indirect draws are not in the scalar bridge");
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_draw_indirect_webgl(c, device, buffer, offset, draw_count, stride);
+				{
+					Buffer* b = buffer;
+				}
 			$endif
 	}
 }
@@ -332,24 +596,58 @@ fn void cmd_draw_indexed_indirect(Cmd* c, Device* device, Buffer* buffer, ulong 
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_draw_indexed_indirect_vk(c, device, buffer, offset, draw_count, stride);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					device.backend.vk.vtable.cmdDrawIndexedIndirect(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, draw_count, stride);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_draw_indexed_indirect_dx12(c, device, buffer, offset, draw_count, stride);
+				{
+					Cmd* cmd = c;
+					assert(buffer != null && buffer.backend.dx12.resource, "indirect draw requires an initialized argument buffer");
+					if (draw_count == 0) return;
+					d3d12::CommandSignature* signature = dx12_draw_signature(device, true);
+					assert(signature, "failed to create D3D12 draw command signature");
+					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
+					uint natural = DX12_DRAW_INDEXED_ARGS_STRIDE;
+					if (stride == 0 || stride == natural)
+					{
+						list.vtbl.execute_indirect(list, signature, draw_count, buffer.backend.dx12.resource, offset, null, 0);
+						return;
+					}
+					for (uint i = 0; i < draw_count; i++)
+					{
+						list.vtbl.execute_indirect(list, signature, 1, buffer.backend.dx12.resource, offset + (ulong)i * stride, null, 0);
+					}
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_draw_indexed_indirect_mtl(c, device, buffer, offset, draw_count, stride);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(state.render_encoder, "graphics command requires an active render pass");
+					assert(state.index_buffer && buffer != null && buffer.backend.mtl.buffer, "indexed indirect draw requires an index buffer and valid argument buffer");
+					uint draw_stride = stride == 0 ? MTL_DRAW_INDEXED_STRIDE : stride;
+					for (uint i = 0; i < draw_count; i++)
+					{
+						state.render_encoder.draw_indexed_primitives_indirect(state.primitive_type, state.index_type, state.index_buffer, state.index_offset, buffer.backend.mtl.buffer, offset + (ulong)i * draw_stride);
+					}
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_draw_indexed_indirect_wgpu(c, device, buffer, offset, draw_count, stride);
+				{
+					 wgpu_log_text("WebGPU: indexed indirect draws are not in the scalar bridge");
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_draw_indexed_indirect_webgl(c, device, buffer, offset, draw_count, stride);
+				{
+					Buffer* b = buffer;
+				}
 			$endif
 	}
 }
@@ -363,24 +661,45 @@ fn void cmd_draw_indirect_count(Cmd* c, Device* device, Buffer* buffer, ulong of
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_draw_indirect_count_vk(c, device, buffer, offset, count_buffer, count_offset, max_draw_count, stride);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					device.backend.vk.vtable.cmdDrawIndirectCount(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, count_buffer.backend.vk.buffer, count_offset, max_draw_count, stride);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_draw_indirect_count_dx12(c, device, buffer, offset, count_buffer, count_offset, max_draw_count, stride);
+				{
+					Cmd* cmd = c;
+					assert(buffer != null && count_buffer != null, "indirect-count draw requires argument and count buffers");
+					assert(buffer.backend.dx12.resource && count_buffer.backend.dx12.resource, "indirect-count draw requires initialized buffers");
+					assert(max_draw_count > 0, "indirect-count draw maximum must be nonzero");
+					assert(stride == 0 || stride == DX12_DRAW_ARGS_STRIDE, "D3D12 indirect-count draw requires tightly packed arguments");
+					d3d12::CommandSignature* signature = dx12_draw_signature(device, false);
+					if (!signature) return;
+					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
+					list.vtbl.execute_indirect(list, signature, max_draw_count, buffer.backend.dx12.resource, offset, count_buffer.backend.dx12.resource, count_offset);
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_draw_indirect_count_mtl(c, device, buffer, offset, count_buffer, count_offset, max_draw_count, stride);
+				{
+					// Metal does not support indirect-count draws.
+					unreachable();
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_draw_indirect_count_wgpu(c, device, buffer, offset, count_buffer, count_offset, max_draw_count, stride);
+				{
+					 wgpu_log_text("WebGPU: indirect-count draws are not in the scalar bridge");
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_draw_indirect_count_webgl(c, device, buffer, offset, count_buffer, count_offset, max_draw_count, stride);
+				{
+					Buffer* b = buffer;
+				}
 			$endif
 	}
 }
@@ -391,24 +710,60 @@ fn void cmd_bind_pipeline(Cmd* c, Device* device, Pipeline* pipeline)
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_bind_pipeline_vk(c, device, pipeline);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					device.backend.vk.vtable.cmdBindPipeline(cmd.backend.vk.cmd, vk::PipelineBindPoint.GRAPHICS, pipeline.backend.vk.pipeline);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_bind_pipeline_dx12(c, device, pipeline);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					assert(pipeline != null && pipeline.backend.dx12.state, "pipeline must be initialized before binding");
+					CmdDx12* state = &cmd.backend.dx12;
+					PipelineDx12* p = &pipeline.backend.dx12;
+					d3d12::GraphicsCommandList* list = state.list;
+					list.vtbl.set_pipeline_state(list, p.state);
+					list.vtbl.set_graphics_root_signature(list, p.root_signature);
+					list.vtbl.ia_set_primitive_topology(list, p.topology);
+					state.vertex_stride = p.vertex_stride;
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_bind_pipeline_mtl(c, device, pipeline);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(state.render_encoder, "graphics command requires an active render pass");
+					assert(pipeline != null && pipeline.backend.mtl.state, "pipeline must be initialized before binding");
+					PipelineMtl* p = &pipeline.backend.mtl;
+					state.primitive_type = p.primitive_type;
+					state.render_encoder.set_render_pipeline_state(p.state);
+					state.render_encoder.set_depth_stencil_state(p.depth_stencil);
+					state.render_encoder.set_cull_mode(p.cull_mode);
+					state.render_encoder.set_front_facing_winding(p.winding);
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_bind_pipeline_wgpu(c, device, pipeline);
+				{
+					c.backend.wgpu.pipeline = pipeline == null ? 0 : pipeline.backend.wgpu.pipeline;
+					c.backend.wgpu.push_constant_group = pipeline == null ? 0 : pipeline.backend.wgpu.push_constant_group;
+					if (c.backend.wgpu.pass != 0 && c.backend.wgpu.pipeline != 0)
+					{
+						wgpu_render_pass_set_pipeline(c.backend.wgpu.pass, c.backend.wgpu.pipeline);
+						if (c.backend.wgpu.push_constant_group != 0) wgpu_render_pass_set_bind_group(c.backend.wgpu.pass, 0, c.backend.wgpu.push_constant_group);
+					}
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_bind_pipeline_webgl(c, device, pipeline);
+				{
+					Pipeline* p = pipeline;
+					 WebglCommand* x = webgl_push(c, PIPELINE); if (x != null) x.pipeline = p;
+				}
 			$endif
 	}
 }
@@ -419,24 +774,62 @@ fn void cmd_set_push_constants(Cmd* c, Device* device, Pipeline* pipeline, char[
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_set_push_constants_vk(c, device, pipeline, bytes);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					device.backend.vk.vtable.cmdPushConstants(cmd.backend.vk.cmd, pipeline.backend.vk.layout, vk::SHADER_STAGE_VERTEX_BIT, 0, (uint)bytes.len, bytes.ptr);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_set_push_constants_dx12(c, device, pipeline, bytes);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					assert(pipeline != null, "push constants require a pipeline");
+					if (bytes.len == 0) return;
+					PipelineDx12* p = &pipeline.backend.dx12;
+					assert(p.push_constant_param != uint::max, "pipeline has no push constant range");
+					assert(bytes.len <= p.push_constant_size, "push constant data exceeds the pipeline limit");
+					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
+					// Root constants are whole 32-bit values; zero-pad a ragged tail.
+					uint count = ((uint)bytes.len + 3) / 4;
+					uint[] values = mem::talloc_array(uint, count);
+					mem::clear(values.ptr, (usz)count * 4);
+					mem::copy(values.ptr, bytes.ptr, bytes.len);
+					list.vtbl.set_graphics_root_32bit_constants(list, p.push_constant_param, count, values.ptr, 0);
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_set_push_constants_mtl(c, device, pipeline, bytes);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(state.render_encoder, "graphics command requires an active render pass");
+					if (bytes.len == 0) return;
+					assert(pipeline != null, "push constants require a pipeline");
+					assert(pipeline.backend.mtl.push_constant_size == 0 || bytes.len <= pipeline.backend.mtl.push_constant_size, "push constant data exceeds the pipeline limit");
+					state.render_encoder.set_vertex_bytes((void*)bytes.ptr, (mtl::NSUInteger)bytes.len, 0);
+					state.render_encoder.set_fragment_bytes((void*)bytes.ptr, (mtl::NSUInteger)bytes.len, 0);
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_set_push_constants_wgpu(c, device, pipeline, bytes);
+				{
+					assert(pipeline != null, "push constants require a pipeline");
+					if (bytes.len == 0) return;
+					assert(pipeline.backend.wgpu.push_constant_buffer != 0, "pipeline has no push constant buffer");
+					uint size = (uint)min(bytes.len, (sz)pipeline.backend.wgpu.push_constant_size);
+					if (size > 0) wgpu_queue_write_buffer(device.backend.wgpu.queue, pipeline.backend.wgpu.push_constant_buffer, 0, bytes.ptr, size);
+					if (c.backend.wgpu.pass != 0 && pipeline.backend.wgpu.push_constant_group != 0) wgpu_render_pass_set_bind_group(c.backend.wgpu.pass, 0, pipeline.backend.wgpu.push_constant_group);
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_set_push_constants_webgl(c, device, pipeline, bytes);
+				{
+					Pipeline* p = pipeline;
+					WebglCommand* x = webgl_push(c, PUSH_CONSTANTS); if (x == null) return;
+					x.pipeline = p; x.push_len = (uint)min(bytes.len, (sz)x.push_data.len); x.push_data[:x.push_len] = bytes[:x.push_len];
+				}
 			$endif
 	}
 }
@@ -449,24 +842,65 @@ fn void cmd_clear_attachment_regions(Cmd* c, Device* device, CmdClearRegion[] re
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_clear_attachment_regions_vk(c, device, regions);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					foreach (region : regions)
+					{
+						vk::ClearAttachment attachment = {
+							.aspectMask = vk::IMAGE_ASPECT_COLOR_BIT,
+							.colorAttachment = 0,
+							.clearValue = { .color = { .float32 = region.color } },
+						};
+						vk::ClearRect rect = {
+							.rect = {
+								.offset = { .x = (int)region.rect.x, .y = (int)region.rect.y },
+								.extent = { .width = (uint)region.rect.width, .height = (uint)region.rect.height },
+							},
+							.baseArrayLayer = 0,
+							.layerCount = 1,
+						};
+						device.backend.vk.vtable.cmdClearAttachments(cmd.backend.vk.cmd, 1, &attachment, 1, &rect);
+					}
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_clear_attachment_regions_dx12(c, device, regions);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					CmdDx12* state = &cmd.backend.dx12;
+					assert(regions.len == 0 || state.rtv_count != 0, "attachment clears require active render targets");
+					d3d12::GraphicsCommandList* list = state.list;
+					// Like Vulkan, only color attachment 0 is cleared.
+					foreach (region : regions)
+					{
+						float[4] color = region.color;
+						d3d12::Rect rect = dx12_rect(region.rect);
+						list.vtbl.clear_render_target_view(list, state.rtvs[0], &color, 1, &rect);
+					}
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_clear_attachment_regions_mtl(c, device, regions);
+				{
+					assert(regions.len == 0, "Metal does not support partial attachment clears");
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_clear_attachment_regions_wgpu(c, device, regions);
+				{
+					// A WebGPU loadOp=clear clears the whole attachment.  Never translate a
+					// region clear into it: that would silently erase pixels outside the region.
+					if (regions.len > 0) abort("WebGPU: partial attachment clears are unsupported");
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_clear_attachment_regions_webgl(c, device, regions);
+				{
+					WebglCommand* x = webgl_push(c, CLEAR_REGIONS); if (x == null) return; x.attachment_count = (uint)min(regions.len, (sz)8); foreach (i, region : regions[:x.attachment_count]) { x.attachments[i].clear_color = region.color; x.attachments[i].rect = region.rect; x.attachments[i].load_op = CLEAR; x.attachments[i].framebuffer = 0; x.attachments[i].texture = 0; }
+				}
 			$endif
 	}
 }
@@ -486,13 +920,9 @@ fn void? cmd_bind_descriptors(Cmd* c, Device* device, Pipeline* pipeline, Descri
 			break;
 		case MTL:
 			$if HAS_MTL:
-				if (c == null || pipeline == null) return;
+					assert(c != null && pipeline != null, "descriptor binding requires a command buffer and pipeline");
 				CmdMtl* state = &c.backend.mtl;
-				if (!state.render_encoder)
-				{
-					log::error("Metal: descriptor binding requires an active render pass");
-					return;
-				}
+				assert(state.render_encoder, "descriptor binding requires an active render pass");
 				PipelineMtl* metal_pipeline = &pipeline.backend.mtl;
 				ResolvedDescriptorSlot[MAX_TEXTURE_BINDINGS] resolved = resolve_descriptor_slots(
 					metal_pipeline.texture_slots[:metal_pipeline.texture_slot_count], bindings)!;
@@ -516,14 +946,52 @@ fn void? cmd_bind_descriptors(Cmd* c, Device* device, Pipeline* pipeline, Descri
 			$endif
 		case WGPU:
 			$if HAS_WGPU:
-				return cmd_bind_descriptors_wgpu(c, device, pipeline, bindings);
+				{
+					assert(c != null && pipeline != null && c.backend.wgpu.pass != 0, "descriptor binding requires a command buffer, pipeline, and active render pass");
+					PipelineWgpu* p = &pipeline.backend.wgpu;
+					DescriptorBinding[MAX_TEXTURE_BINDINGS] texture_bindings;
+					uint texture_binding_count = 0;
+					foreach (b : bindings)
+					{
+						if (b.descriptor.type == SAMPLED_IMAGE || b.descriptor.type == SAMPLER)
+						{
+							if (texture_binding_count >= texture_bindings.len) return TOO_MANY_TEXTURE_BINDINGS~;
+							texture_bindings[texture_binding_count++] = b;
+						}
+						else if (!descriptor_is_empty(b.descriptor)) return DESCRIPTOR_TYPE_MISMATCH~;
+					}
+					ResolvedDescriptorSlot[MAX_TEXTURE_BINDINGS] resolved = resolve_descriptor_slots(p.texture_slots[:p.texture_slot_count], texture_bindings[:texture_binding_count])!;
+					if (p.texture_slot_count == 0) return;
+					uint[32] entries;
+					uint count = 0;
+					for (uint i = 0; i < p.texture_slot_count; i++)
+					{
+						TextureSlot slot = p.texture_slots[i];
+						if (!resolved[i].has_texture) return DESCRIPTOR_MISSING~;
+						entries[count] = slot.binding; entries[count + 1] = (uint)resolved[i].texture.handle; count += 2;
+						if (resolved[i].has_sampler)
+						{
+							if (!slot.has_sampler_binding) return SAMPLER_REQUIRED~;
+							entries[count] = slot.sampler_binding; entries[count + 1] = (uint)resolved[i].sampler.handle; count += 2;
+						}
+					}
+					uint group = wgpu_device_create_bind_group_textures(device.backend.wgpu.device, p.texture_layout, &entries[0], count);
+					if (group == 0) return INITIALIZATION_FAILED~;
+					wgpu_render_pass_set_bind_group(c.backend.wgpu.pass, 1, group);
+					wgpu_release_if(&c.backend.wgpu.texture_bind_group);
+					c.backend.wgpu.texture_bind_group = group;
+					return;
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				return cmd_bind_descriptors_webgl(c, device, pipeline, bindings);
+				{
+					Pipeline* p = pipeline;
+					WebglCommand* x = webgl_push(c, DESCRIPTORS); if (x == null) return INITIALIZATION_FAILED~; x.pipeline = p; x.descriptor_count = (uint)min(bindings.len, (sz)MAX_TEXTURE_BINDINGS); x.descriptors[:x.descriptor_count] = bindings[:x.descriptor_count]; return;
+				}
 			$endif
 	}
-	return UNSUPPORTED_BACKEND~;
+	unreachable();
 }
 
 // One pipeline texture slot's matched descriptors, indexed alongside the pipeline's slots.
@@ -613,35 +1081,196 @@ struct CmdDepthAttachment
 struct CmdBeginRenderingOptions
 {
 	CmdColorAttachment[] color_attachments;
-	Rect render_area;
+	std::math::geometry::Rect render_area;
 	CmdDepthAttachment depth_attachment;
 	bool has_depth_attachment;
 }
 
-fn void cmd_begin_rendering(Cmd* c, Device* device, CmdBeginRenderingOptions options)
+fn void cmd_begin_rendering(Cmd* c, Device* device, CmdBeginRenderingOptions options) @inline
 {
 	switch (renderer.backend)
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_begin_rendering_vk(c, device, options);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					assert(options.color_attachments.len <= 8, "Metal supports at most eight color attachments");
+					vk::RenderingAttachmentInfo[8] colors;
+					foreach (i, color : options.color_attachments)
+					{
+						colors[i] = {
+							.sType = vk::StructureType.RENDERING_ATTACHMENT_INFO,
+							.imageView = color.view.backend.vk.view,
+							.imageLayout = vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+							.loadOp = vk_load_op(color.load_op),
+							.storeOp = vk_store_op(color.store_op),
+							.clearValue = { .color = { .float32 = color.clear_color } },
+						};
+					}
+					vk::RenderingAttachmentInfo depth;
+					vk::RenderingAttachmentInfo stencil;
+					vk::RenderingInfo info = {
+						.sType = vk::StructureType.RENDERING_INFO,
+						.renderArea = {
+							.offset = { .x = (int)options.render_area.x, .y = (int)options.render_area.y },
+							.extent = { .width = (uint)options.render_area.width, .height = (uint)options.render_area.height },
+						},
+						.layerCount = 1,
+						.colorAttachmentCount = (uint)options.color_attachments.len,
+						.pColorAttachments = &colors[0],
+					};
+					if (options.has_depth_attachment)
+					{
+						CmdDepthAttachment d = options.depth_attachment;
+						depth = {
+							.sType = vk::StructureType.RENDERING_ATTACHMENT_INFO,
+							.imageView = d.view.backend.vk.view,
+							.imageLayout = d.read_only ? vk::ImageLayout.DEPTH_READ_ONLY_OPTIMAL : vk::ImageLayout.DEPTH_ATTACHMENT_OPTIMAL,
+							.loadOp = vk_load_op(d.load_op),
+							.storeOp = vk_store_op(d.store_op),
+							.clearValue = { .depthStencil = { .depth = d.clear_depth, .stencil = 0 } },
+						};
+						info.pDepthAttachment = &depth;
+						if (d.has_stencil)
+						{
+							stencil = {
+								.sType = vk::StructureType.RENDERING_ATTACHMENT_INFO,
+								.imageView = d.view.backend.vk.view,
+								.imageLayout = vk::ImageLayout.STENCIL_ATTACHMENT_OPTIMAL,
+								.loadOp = vk_load_op(d.stencil_load_op),
+								.storeOp = vk_store_op(d.stencil_store_op),
+								.clearValue = { .depthStencil = { .depth = d.clear_depth, .stencil = d.clear_stencil } },
+							};
+							info.pStencilAttachment = &stencil;
+						}
+					}
+					device.backend.vk.vtable.cmdBeginRendering(cmd.backend.vk.cmd, &info);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_begin_rendering_dx12(c, device, options);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					assert(options.color_attachments.len <= DX12_MAX_RENDER_TARGETS, "render pass exceeds the D3D12 render target limit");
+					CmdDx12* state = &cmd.backend.dx12;
+					d3d12::GraphicsCommandList* list = state.list;
+
+					state.rtv_count = (uint)options.color_attachments.len;
+					foreach (i, color : options.color_attachments)
+					{
+						state.rtvs[i] = color.view.backend.dx12.cpu;
+					}
+					state.has_dsv = options.has_depth_attachment;
+					if (state.has_dsv) state.dsv = options.depth_attachment.view.backend.dx12.cpu;
+					list.vtbl.om_set_render_targets(list, state.rtv_count, state.rtv_count > 0 ? &state.rtvs[0] : null, 0, state.has_dsv ? &state.dsv : null);
+
+					// Vulkan clears only inside the render area.
+					d3d12::Rect area = dx12_rect(options.render_area);
+					bool has_area = options.render_area.width != 0 && options.render_area.height != 0;
+					foreach (i, color : options.color_attachments)
+					{
+						if (color.load_op != LoadOp.CLEAR) continue;
+						float[4] clear_color = color.clear_color;
+						list.vtbl.clear_render_target_view(list, state.rtvs[i], &clear_color, has_area ? 1 : 0, has_area ? &area : null);
+					}
+					if (state.has_dsv)
+					{
+						CmdDepthAttachment depth = options.depth_attachment;
+						d3d12::ClearFlags flags = 0;
+						if (depth.load_op == LoadOp.CLEAR && !depth.read_only) flags |= d3d12::CLEAR_FLAG_DEPTH;
+						if (depth.has_stencil && depth.stencil_load_op == LoadOp.CLEAR) flags |= d3d12::CLEAR_FLAG_STENCIL;
+						if (flags != 0)
+						{
+							list.vtbl.clear_depth_stencil_view(list, state.dsv, flags, depth.clear_depth, (char)depth.clear_stencil, has_area ? 1 : 0, has_area ? &area : null);
+						}
+					}
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_begin_rendering_mtl(c, device, options);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(state.command_buffer, "rendering requires an active command buffer");
+					assert(!state.render_encoder, "rendering cannot begin while another render pass is active");
+					mtl_finish_blit(state);
+					objc::@autoreleasepool()
+					{
+						mtl::RenderPassDescriptor desc = mtl::render_pass_descriptor();
+						if (!desc) { log::error("Metal: failed to create render pass descriptor"); return; }
+						mtl::RenderPassColorAttachmentDescriptorArray colors = desc.color_attachments();
+						foreach (i, attachment : options.color_attachments)
+						{
+							if (!attachment.view.backend.mtl.texture) continue;
+							mtl::RenderPassColorAttachmentDescriptor color = colors.object((mtl::NSUInteger)i);
+							color.set_texture(attachment.view.backend.mtl.texture);
+							color.set_load_action(mtl_load_action(attachment.load_op));
+							color.set_store_action(mtl_store_action(attachment.store_op));
+							if (attachment.load_op == CLEAR)
+							{
+								color.set_clear_color({ .red = attachment.clear_color[0], .green = attachment.clear_color[1], .blue = attachment.clear_color[2], .alpha = attachment.clear_color[3] });
+							}
+						}
+						if (options.has_depth_attachment && options.depth_attachment.view.backend.mtl.texture)
+						{
+							CmdDepthAttachment depth = options.depth_attachment;
+							mtl::RenderPassDepthAttachmentDescriptor depth_desc = desc.depth_attachment();
+							depth_desc.set_texture(depth.view.backend.mtl.texture);
+							depth_desc.set_load_action(mtl_load_action(depth.load_op));
+							depth_desc.set_store_action(mtl_store_action(depth.store_op));
+							if (depth.load_op == CLEAR) depth_desc.set_clear_depth(depth.clear_depth);
+							if (depth.has_stencil)
+							{
+								mtl::RenderPassStencilAttachmentDescriptor stencil = desc.stencil_attachment();
+								stencil.set_texture(depth.view.backend.mtl.texture);
+								stencil.set_load_action(mtl_load_action(depth.stencil_load_op));
+								stencil.set_store_action(mtl_store_action(depth.stencil_store_op));
+								if (depth.stencil_load_op == CLEAR) stencil.set_clear_stencil(depth.clear_stencil);
+							}
+						}
+						state.render_encoder = state.command_buffer.render_command_encoder(desc);
+						if (!state.render_encoder)
+						{
+							log::error("Metal: failed to create render encoder");
+							return;
+						}
+						state.render_encoder.retain();
+						state.render_active = true;
+					};
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_begin_rendering_wgpu(c, device, options);
+				{
+					CmdWgpu* s = &c.backend.wgpu;
+					assert(s.encoder != 0, "rendering requires an active command encoder");
+					assert(options.color_attachments.len == 1, "WebGPU requires exactly one color attachment");
+					if (s.pass != 0) { wgpu_render_pass_end(s.pass); s.pass = 0; }
+					CmdColorAttachment color = options.color_attachments[0];
+					uint depth_view = options.has_depth_attachment ? options.depth_attachment.view.backend.wgpu.view : 0;
+					uint color_load = color.load_op == LOAD ? 0 : 1;
+					uint color_store = color.store_op == STORE ? 0 : 1;
+					uint depth_load = options.has_depth_attachment && options.depth_attachment.load_op == LOAD ? 0 : 1;
+					uint depth_store = options.has_depth_attachment && options.depth_attachment.store_op == STORE ? 0 : 1;
+					s.pass = wgpu_command_encoder_begin_render_pass(s.encoder, color.view.backend.wgpu.view, color_load, color_store, color.clear_color[0], color.clear_color[1], color.clear_color[2], color.clear_color[3], depth_view, depth_load, depth_store, options.has_depth_attachment ? options.depth_attachment.clear_depth : 1);
+					if (s.pass != 0 && options.render_area.x >= 0 && options.render_area.y >= 0) wgpu_render_pass_set_scissor_rect(s.pass, (uint)options.render_area.x, (uint)options.render_area.y, (uint)options.render_area.width, (uint)options.render_area.height);
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_begin_rendering_webgl(c, device, options);
+				{
+					WebglCommand* x = webgl_push(c, BEGIN_RENDERING); if (x == null) return; x.rect = options.render_area; x.width = (uint)options.render_area.width; x.height = (uint)options.render_area.height; x.attachment_count = (uint)min(options.color_attachments.len, (sz)8); foreach (i, a : options.color_attachments[:x.attachment_count]) { x.attachments[i].texture = a.view.backend.webgl.texture; x.attachments[i].framebuffer = a.view.backend.webgl.framebuffer; x.attachments[i].load_op = a.load_op; x.attachments[i].clear_color = a.clear_color; } if (x.attachment_count > 0) x.framebuffer = x.attachments[0].framebuffer; c.backend.webgl.pass_open = true;
+					if (options.has_depth_attachment)
+					{
+						x.has_depth = true;
+						x.clear_depth = options.depth_attachment.load_op == CLEAR;
+						x.depth = options.depth_attachment.clear_depth;
+						if (x.framebuffer == 0) x.framebuffer = options.depth_attachment.view.backend.webgl.framebuffer;
+						gl_framebuffer_texture_2d(x.framebuffer, GL_DEPTH_ATTACHMENT, options.depth_attachment.view.backend.webgl.texture);
+					}
+				}
 			$endif
 	}
 }
@@ -652,24 +1281,40 @@ fn void cmd_end_rendering(Cmd* c, Device* device)
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_end_rendering_vk(c, device);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					device.backend.vk.vtable.cmdEndRendering(cmd.backend.vk.cmd);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_end_rendering_dx12(c, device);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					CmdDx12* state = &cmd.backend.dx12;
+					state.rtv_count = 0;
+					state.has_dsv = false;
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_end_rendering_mtl(c, device);
+				{
+					mtl_finish_render(&c.backend.mtl);
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_end_rendering_wgpu(c, device);
+				{
+					if (c.backend.wgpu.pass != 0) { wgpu_render_pass_end(c.backend.wgpu.pass); c.backend.wgpu.pass = 0; }
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_end_rendering_webgl(c, device);
+				{
+					 WebglCommand* x = webgl_push(c, END_RENDERING); if (x != null) c.backend.webgl.pass_open = false;
+				}
 			$endif
 	}
 }
@@ -689,32 +1334,88 @@ fn void cmd_bind_vertex_buffer(Cmd* c, Device* device, Buffer* buffer, uint slot
 // Bind `buffers[i]` to binding `first_binding + i` at `offsets[i]`. A nil
 // buffer entry binds nothing to its slot; nil `offsets` means all zero,
 // otherwise it must be as long as `buffers`.
-fn void cmd_bind_vertex_buffers(Cmd* c, Device* device, uint first_binding, Buffer*[] buffers, ulong[] offsets = {})
+fn void cmd_bind_vertex_buffers(Cmd* c, Device* device, uint first_binding, Buffer*[] buffers, ulong[] offsets = {}) @inline
 {
-	assert(offsets.ptr == null || offsets.len == buffers.len);
+	assert(offsets.ptr == null || offsets.len == buffers.len, "vertex buffer offsets must match the buffer count");
 	if (buffers.len == 0) return;
 	switch (renderer.backend)
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_bind_vertex_buffers_vk(c, device, first_binding, buffers, offsets);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					assert(buffers.len <= 32, "Vulkan supports at most 32 vertex buffers in one call");
+					assert(offsets.ptr == null || offsets.len == buffers.len, "vertex buffer offsets must match the buffer count");
+					if (buffers.len == 0) return;
+					vk::Buffer[32] vk_buffers;
+					vk::DeviceSize[32] vk_offsets;
+					foreach (i, buffer : buffers)
+					{
+						if (buffer != null) vk_buffers[i] = buffer.backend.vk.buffer;
+						if (offsets.ptr != null) vk_offsets[i] = offsets[i];
+					}
+					uint start = 0;
+					while (start < buffers.len)
+					{
+						while (start < buffers.len && buffers[start] == null) start++;
+						if (start == buffers.len) break;
+						uint end = start + 1;
+						while (end < buffers.len && buffers[end] != null) end++;
+						device.backend.vk.vtable.cmdBindVertexBuffers(cmd.backend.vk.cmd, first_binding + start, end - start, &vk_buffers[start], &vk_offsets[start]);
+						start = end;
+					}
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_bind_vertex_buffers_dx12(c, device, first_binding, buffers, offsets);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					assert(offsets.ptr == null || offsets.len == buffers.len, "vertex buffer offsets must match the buffer count");
+					CmdDx12* state = &cmd.backend.dx12;
+					d3d12::GraphicsCommandList* list = state.list;
+					foreach (i, buffer : buffers)
+					{
+						if (buffer == null || !buffer.backend.dx12.resource) continue;
+						ulong offset = offsets.ptr == null ? 0 : offsets[i];
+						BufferDx12* b = &buffer.backend.dx12;
+						if (offset > b.size) continue;
+						d3d12::VertexBufferView view = {
+							.buffer_location = b.gpu_address + offset,
+							.size_in_bytes = (uint)(b.size - offset),
+							.stride_in_bytes = state.vertex_stride,
+						};
+						list.vtbl.ia_set_vertex_buffers(list, first_binding + (uint)i, 1, &view);
+					}
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_bind_vertex_buffers_mtl(c, device, first_binding, buffers, offsets);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(state.render_encoder, "graphics command requires an active render pass");
+					foreach (i, buffer : buffers)
+					{
+						if (buffer == null || !buffer.backend.mtl.buffer) continue;
+						ulong offset = offsets.len == 0 ? 0 : offsets[i];
+						state.render_encoder.set_vertex_buffer(buffer.backend.mtl.buffer, offset, (mtl::NSUInteger)(MTL_VERTEX_BUFFER_BASE + first_binding + (uint)i));
+					}
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_bind_vertex_buffers_wgpu(c, device, first_binding, buffers, offsets);
+				{
+					assert(c.backend.wgpu.pass != 0, "vertex buffer binding requires an active render pass");
+					foreach (i, b : buffers) if (b != null && b.cookie != 0) wgpu_render_pass_set_vertex_buffer(c.backend.wgpu.pass, first_binding + (uint)i, b.backend.wgpu.buffer, offsets.len == 0 ? 0 : (uint)offsets[i]);
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_bind_vertex_buffers_webgl(c, device, first_binding, buffers, offsets);
+				{
+					WebglCommand* x = webgl_push(c, VERTEX_BUFFERS); if (x == null) return; x.first_binding = first_binding; x.buffer_count = (uint)min(buffers.len, (sz)8); foreach (i, b : buffers[:x.buffer_count]) { x.buffers[i] = b; x.offsets[i] = offsets.len == buffers.len ? offsets[i] : 0; }
+				}
 			$endif
 	}
 }
@@ -725,24 +1426,52 @@ fn void cmd_bind_index_buffer(Cmd* c, Device* device, Buffer* buffer, IndexType 
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_bind_index_buffer_vk(c, device, buffer, index_type, offset);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					vk::IndexType vk_index_type = index_type == UINT16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32;
+					device.backend.vk.vtable.cmdBindIndexBuffer(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, vk_index_type);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_bind_index_buffer_dx12(c, device, buffer, index_type, offset);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					assert(buffer != null && buffer.backend.dx12.resource, "index buffer must be initialized before binding");
+					BufferDx12* b = &buffer.backend.dx12;
+					assert(offset <= b.size, "index buffer offset exceeds the buffer size");
+					d3d12::IndexBufferView view = {
+						.buffer_location = b.gpu_address + offset,
+						.size_in_bytes = (uint)(b.size - offset),
+						.format = index_type == IndexType.UINT16 ? dxgi::Format.R16_UINT : dxgi::Format.R32_UINT,
+					};
+					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
+					list.vtbl.ia_set_index_buffer(list, &view);
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_bind_index_buffer_mtl(c, device, buffer, index_type, offset);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					state.index_buffer = buffer == null ? null : buffer.backend.mtl.buffer;
+					state.index_type = index_type == IndexType.UINT16 ? mtl::IndexType.UINT16 : mtl::IndexType.UINT32;
+					state.index_offset = offset;
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_bind_index_buffer_wgpu(c, device, buffer, index_type, offset);
+				{
+					if (c.backend.wgpu.pass != 0 && buffer != null) { c.backend.wgpu.index_format = index_type == UINT16 ? 0 : 1; wgpu_render_pass_set_index_buffer(c.backend.wgpu.pass, buffer.backend.wgpu.buffer, c.backend.wgpu.index_format, (uint)offset); }
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_bind_index_buffer_webgl(c, device, buffer, index_type, offset);
+				{
+					Buffer* b = buffer;
+					 WebglCommand* x = webgl_push(c, INDEX_BUFFER); if (x != null) { x.buffer = b; x.index_type = index_type; x.offset = offset; }
+				}
 			$endif
 	}
 }
@@ -895,24 +1624,209 @@ fn void cmd_resource_barrier(Cmd* c, Device* device, MemoryBarrier[] memory = {}
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_resource_barrier_vk(c, device, memory, buffers, images);
+				{
+					Cmd* cmd = c;
+					VkStageMaskResult source;
+					VkStageMaskResult destination;
+					vk::MemoryBarrier2[] vk_memory = mem::temp_array(vk::MemoryBarrier2, memory.len);
+					vk::BufferMemoryBarrier2[] vk_buffers = mem::temp_array(vk::BufferMemoryBarrier2, buffers.len);
+					vk::ImageMemoryBarrier2[] vk_images = mem::temp_array(vk::ImageMemoryBarrier2, images.len);
+					uint memory_count;
+					uint buffer_count;
+					uint image_count;
+					foreach (barrier : memory)
+					{
+						source = vk_stage_bits_to_vk(barrier.before_stages, barrier.before, cmd.barrier_capabilities);
+						destination = vk_stage_bits_to_vk(barrier.after_stages, barrier.after, cmd.barrier_capabilities);
+						assert(source.ok && destination.ok, "memory barrier uses unsupported access states");
+						vk_memory[memory_count] = { .sType = vk::StructureType.MEMORY_BARRIER_2, .srcStageMask = source.mask, .srcAccessMask = vk_resource_state_to_access(barrier.before), .dstStageMask = destination.mask, .dstAccessMask = vk_resource_state_to_access(barrier.after) };
+						memory_count++;
+					}
+					foreach (barrier : buffers)
+					{
+						source = vk_stage_bits_to_vk(barrier.before_stages, barrier.before, cmd.barrier_capabilities);
+						destination = vk_stage_bits_to_vk(barrier.after_stages, barrier.after, cmd.barrier_capabilities);
+						assert(source.ok && destination.ok, "buffer barrier uses unsupported access states");
+						vk_buffers[buffer_count] = {
+							.sType = vk::StructureType.BUFFER_MEMORY_BARRIER_2,
+							.srcStageMask = source.mask,
+							.srcAccessMask = vk_resource_state_to_access(barrier.before),
+							.dstStageMask = destination.mask,
+							.dstAccessMask = vk_resource_state_to_access(barrier.after),
+							.srcQueueFamilyIndex = vk::QUEUE_FAMILY_IGNORED,
+							.dstQueueFamilyIndex = vk::QUEUE_FAMILY_IGNORED,
+							.buffer = barrier.buffer.backend.vk.buffer,
+							.offset = barrier.offset,
+							.size = barrier.size == 0 ? vk::WHOLE_SIZE : barrier.size,
+						};
+						buffer_count++;
+					}
+					foreach (barrier : images)
+					{
+						source = vk_stage_bits_to_vk(barrier.before_stages, barrier.before, cmd.barrier_capabilities);
+						destination = vk_stage_bits_to_vk(barrier.after_stages, barrier.after, cmd.barrier_capabilities);
+						assert(source.ok && destination.ok, "image barrier uses unsupported access states");
+						vk_images[image_count] = {
+							.sType = vk::StructureType.IMAGE_MEMORY_BARRIER_2,
+							.srcStageMask = source.mask,
+							.srcAccessMask = vk_resource_state_to_access(barrier.before),
+							.dstStageMask = destination.mask,
+							.dstAccessMask = vk_resource_state_to_access(barrier.after),
+							.oldLayout = vk_resource_state_to_image_layout_aspect(barrier.before, barrier.aspect),
+							.newLayout = vk_resource_state_to_image_layout_aspect(barrier.after, barrier.aspect),
+							.srcQueueFamilyIndex = vk::QUEUE_FAMILY_IGNORED,
+							.dstQueueFamilyIndex = vk::QUEUE_FAMILY_IGNORED,
+							.image = barrier.image.backend.vk.image,
+							.subresourceRange = {
+								.aspectMask = vk_barrier_aspect(barrier.aspect),
+								.baseMipLevel = barrier.base_mip,
+								.levelCount = barrier.mip_count == 0 ? vk::REMAINING_MIP_LEVELS : barrier.mip_count,
+								.baseArrayLayer = barrier.base_layer,
+								.layerCount = barrier.layer_count == 0 ? vk::REMAINING_ARRAY_LAYERS : barrier.layer_count,
+							},
+						};
+						image_count++;
+					}
+					if (memory_count + buffer_count + image_count == 0) return;
+					vk::DependencyInfo dependency = {
+						.sType = vk::StructureType.DEPENDENCY_INFO,
+						.memoryBarrierCount = memory_count,
+						.pMemoryBarriers = vk_memory.ptr,
+						.bufferMemoryBarrierCount = buffer_count,
+						.pBufferMemoryBarriers = vk_buffers.ptr,
+						.imageMemoryBarrierCount = image_count,
+						.pImageMemoryBarriers = vk_images.ptr,
+					};
+					device.backend.vk.vtable.cmdPipelineBarrier2(cmd.backend.vk.cmd, &dependency);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_resource_barrier_dx12(c, device, memory, buffers, images);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
+					d3d12::ResourceBarrier[] barriers = mem::talloc_array(d3d12::ResourceBarrier, memory.len + buffers.len + images.len);
+					uint count = 0;
+					foreach (m : memory)
+					{
+						d3d12::ResourceStates before = dx12_resource_states(m.before, m.before_stages);
+						d3d12::ResourceStates after = dx12_resource_states(m.after, m.after_stages);
+						if (dx12_barrier_kind(before, after) != Dx12BarrierKind.UAV) continue;
+						d3d12::ResourceBarrier b = {};
+						b.type = d3d12::ResourceBarrierType.UAV;
+						b.flags = d3d12::RESOURCE_BARRIER_FLAG_NONE;
+						b.uav.resource = null;
+						barriers[count++] = b;
+					}
+					foreach (b : buffers)
+					{
+						if (b.buffer == null || !b.buffer.backend.dx12.resource) continue;
+						if (b.buffer.backend.dx12.heap_type != d3d12::HeapType.DEFAULT) continue;
+						d3d12::ResourceStates before = dx12_resource_states(b.before, b.before_stages);
+						d3d12::ResourceStates after = dx12_resource_states(b.after, b.after_stages);
+						count += dx12_emit_barrier(&barriers[count], b.buffer.backend.dx12.resource, d3d12::RESOURCE_BARRIER_ALL_SUBRESOURCES, before, after);
+					}
+					// Partially-covered images expand to one barrier per subresource, so they
+					// are flushed on their own below.
+					foreach (b : images)
+					{
+						if (b.image == null || !b.image.backend.dx12.resource) continue;
+						ImageDx12* image = &b.image.backend.dx12;
+						if (!dx12_image_barrier_whole(image, b)) continue;
+						d3d12::ResourceStates before = dx12_resource_states(b.before, b.before_stages);
+						d3d12::ResourceStates after = dx12_resource_states(b.after, b.after_stages);
+						count += dx12_emit_barrier(&barriers[count], image.resource, d3d12::RESOURCE_BARRIER_ALL_SUBRESOURCES, before, after);
+					}
+					if (count > 0) list.vtbl.resource_barrier(list, count, barriers.ptr);
+
+					foreach (b : images)
+					{
+						if (b.image == null || !b.image.backend.dx12.resource) continue;
+						ImageDx12* image = &b.image.backend.dx12;
+						if (dx12_image_barrier_whole(image, b)) continue;
+						d3d12::ResourceStates before = dx12_resource_states(b.before, b.before_stages);
+						d3d12::ResourceStates after = dx12_resource_states(b.after, b.after_stages);
+						uint mips = b.mip_count == 0 ? image.mip_levels - b.base_mip : b.mip_count;
+						uint layers = b.layer_count == 0 ? image.array_layers - b.base_layer : b.layer_count;
+						bool stencil = format_get_props(image.format).is_stencil;
+						uint planes;
+						switch (b.aspect)
+						{
+							case STENCIL: planes = 0b10;
+							case DEPTH_STENCIL: planes = stencil ? 0b11 : 0b01;
+							default: planes = 0b01;
+						}
+						d3d12::ResourceBarrier[] subresources = mem::talloc_array(d3d12::ResourceBarrier, (usz)mips * layers * 2);
+						uint n = 0;
+						for (uint plane = 0; plane < 2; plane++)
+						{
+							if ((planes & (1u << plane)) == 0) continue;
+							for (uint layer = b.base_layer; layer < b.base_layer + layers; layer++)
+							{
+								for (uint mip = b.base_mip; mip < b.base_mip + mips; mip++)
+								{
+									uint index = mip + (layer + plane * image.array_layers) * image.mip_levels;
+									n += dx12_emit_barrier(&subresources[n], image.resource, index, before, after);
+								}
+							}
+						}
+						if (n > 0) list.vtbl.resource_barrier(list, n, subresources.ptr);
+					}
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_resource_barrier_mtl(c, device, memory, buffers, images);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					if (!state.render_encoder) return;
+					if (memory.len == 0 && buffers.len == 0 && images.len == 0) return;
+					bool storage = false;
+					foreach (barrier : memory)
+					{
+						if (barrier.before.storage_read || barrier.before.storage_write || barrier.after.storage_read || barrier.after.storage_write) { storage = true; break; }
+					}
+					if (!storage) foreach (barrier : buffers)
+					{
+						if (barrier.before.storage_read || barrier.before.storage_write || barrier.after.storage_read || barrier.after.storage_write) { storage = true; break; }
+					}
+					if (!storage) foreach (barrier : images)
+					{
+						if (barrier.before.storage_read || barrier.before.storage_write || barrier.after.storage_read || barrier.after.storage_write) { storage = true; break; }
+					}
+					if (!storage) return;
+					mtl::BarrierScope scope = {};
+					if (memory.len != 0 || buffers.len != 0) scope |= mtl::BARRIER_SCOPE_BUFFERS;
+					if (memory.len != 0 || images.len != 0) scope |= mtl::BARRIER_SCOPE_TEXTURES;
+					if (images.len != 0)
+					{
+						foreach (barrier : images)
+						{
+							if (barrier.before.render_target || barrier.after.render_target || barrier.before.depth_write || barrier.after.depth_write)
+							{
+								scope |= mtl::BARRIER_SCOPE_RENDER_TARGETS;
+								break;
+							}
+						}
+					}
+					BarrierStages before = {};
+					BarrierStages after = {};
+					foreach (barrier : memory) { before |= barrier.before_stages; after |= barrier.after_stages; }
+					foreach (barrier : buffers) { before |= barrier.before_stages; after |= barrier.after_stages; }
+					foreach (barrier : images) { before |= barrier.before_stages; after |= barrier.after_stages; }
+					state.render_encoder.memory_barrier(scope, mtl_render_stages(after), mtl_render_stages(before));
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_resource_barrier_wgpu(c, device, memory, buffers, images);
+				{
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_resource_barrier_webgl(c, device, memory, buffers, images);
+				{
+				}
 			$endif
 	}
 }
@@ -966,24 +1880,69 @@ fn void cmd_copy_buffer_to_texture(Cmd* c, Device* device, CmdCopyBufferToTextur
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_copy_buffer_to_texture_vk(c, device, options);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					vk::BufferImageCopy region = {
+						.bufferOffset = options.buffer_offset,
+						.bufferRowLength = options.buffer_row_length,
+						.bufferImageHeight = options.buffer_image_height,
+						.imageSubresource = { .aspectMask = vk_barrier_aspect(options.aspect), .mipLevel = options.mip_level, .baseArrayLayer = options.base_array_layer, .layerCount = options.layer_count },
+						.imageOffset = { .x = options.x, .y = options.y, .z = options.z },
+						.imageExtent = { .width = options.width, .height = options.height, .depth = options.depth },
+					};
+					device.backend.vk.vtable.cmdCopyBufferToImage(cmd.backend.vk.cmd, options.src.backend.vk.buffer, options.dst.backend.vk.image, vk::ImageLayout.TRANSFER_DST_OPTIMAL, 1, &region);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_copy_buffer_to_texture_dx12(c, device, options);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					dx12_copy_buffer_image(
+						cmd, options.src, options.dst, true,
+						options.buffer_offset, options.bytes_per_row, options.bytes_per_image,
+						options.mip_level, options.base_array_layer, options.layer_count, options.aspect,
+						options.x, options.y, options.z, options.width, options.height, options.depth);
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_copy_buffer_to_texture_mtl(c, device, options);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(options.src != null && options.dst != null, "buffer-to-image copy requires source and destination resources");
+					assert(options.src.backend.mtl.buffer && options.dst.backend.mtl.texture, "buffer-to-image copy requires a buffer and texture");
+					assert(options.width > 0 && options.height > 0 && options.depth > 0 && options.layer_count > 0, "buffer-to-image copy extent and layer count must be nonzero");
+					assert(options.x >= 0 && options.y >= 0 && options.z >= 0, "buffer-to-image copy origin must be nonnegative");
+					if (!mtl_begin_blit(state)) return;
+					uint row = 0;
+					uint image = 0;
+					mtl_copy_layout(options.dst.backend.mtl.format, options.width, options.height, options.bytes_per_row, options.bytes_per_image, options.buffer_row_length, options.buffer_image_height, &row, &image);
+					if (options.dst.backend.mtl.image_type == D3)
+					{
+						state.blit_encoder.copy_buffer_to_texture(options.src.backend.mtl.buffer, options.buffer_offset, row, image, { .width = options.width, .height = options.height, .depth = options.depth }, options.dst.backend.mtl.texture, 0, options.mip_level, { .x = (mtl::NSUInteger)options.x, .y = (mtl::NSUInteger)options.y, .z = (mtl::NSUInteger)options.z });
+					}
+					else
+					{
+						for (uint layer = 0; layer < options.layer_count; layer++)
+						{
+							state.blit_encoder.copy_buffer_to_texture(options.src.backend.mtl.buffer, options.buffer_offset + (ulong)layer * image, row, image, { .width = options.width, .height = options.height, .depth = 1 }, options.dst.backend.mtl.texture, (mtl::NSUInteger)(options.base_array_layer + layer), options.mip_level, { .x = (mtl::NSUInteger)options.x, .y = (mtl::NSUInteger)options.y, .z = 0 });
+						}
+					}
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_copy_buffer_to_texture_wgpu(c, device, options);
+				{
+					 wgpu_log_text("WebGPU: buffer-to-texture copies are unsupported; use image_upload");
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_copy_buffer_to_texture_webgl(c, device, options);
+				{
+					WebglCommand* x = webgl_push(c, COPY_BUFFER_TEXTURE); if (x != null) { x.src = options.src; x.image = options.dst; x.offset = options.buffer_offset; x.rect = { .x = (float)options.x, .y = (float)options.y, .width = (float)options.width, .height = (float)options.height }; }
+				}
 			$endif
 	}
 }
@@ -1019,24 +1978,68 @@ fn void cmd_copy_texture_to_buffer(Cmd* c, Device* device, CmdCopyTextureToBuffe
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_copy_texture_to_buffer_vk(c, device, options);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					vk::BufferImageCopy region = {
+						.bufferOffset = options.buffer_offset,
+						.bufferRowLength = options.buffer_row_length,
+						.bufferImageHeight = options.buffer_image_height,
+						.imageSubresource = { .aspectMask = vk_barrier_aspect(options.aspect), .mipLevel = options.mip_level, .baseArrayLayer = options.base_array_layer, .layerCount = options.layer_count },
+						.imageOffset = { .x = options.x, .y = options.y, .z = options.z },
+						.imageExtent = { .width = options.width, .height = options.height, .depth = options.depth },
+					};
+					device.backend.vk.vtable.cmdCopyImageToBuffer(cmd.backend.vk.cmd, options.src.backend.vk.image, vk::ImageLayout.TRANSFER_SRC_OPTIMAL, options.dst.backend.vk.buffer, 1, &region);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_copy_texture_to_buffer_dx12(c, device, options);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					dx12_copy_buffer_image(
+						cmd, options.dst, options.src, false,
+						options.buffer_offset, options.bytes_per_row, options.bytes_per_image,
+						options.mip_level, options.base_array_layer, options.layer_count, options.aspect,
+						options.x, options.y, options.z, options.width, options.height, options.depth);
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_copy_texture_to_buffer_mtl(c, device, options);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(options.src != null && options.dst != null, "image-to-buffer copy requires source and destination resources");
+					assert(options.src.backend.mtl.texture && options.dst.backend.mtl.buffer, "image-to-buffer copy requires a texture and buffer");
+					assert(options.width > 0 && options.height > 0 && options.depth > 0 && options.layer_count > 0, "image-to-buffer copy extent and layer count must be nonzero");
+					assert(options.x >= 0 && options.y >= 0 && options.z >= 0, "image-to-buffer copy origin must be nonnegative");
+					if (!mtl_begin_blit(state)) return;
+					uint row = 0;
+					uint image = 0;
+					mtl_copy_layout(options.src.backend.mtl.format, options.width, options.height, options.bytes_per_row, options.bytes_per_image, options.buffer_row_length, options.buffer_image_height, &row, &image);
+					if (options.src.backend.mtl.image_type == D3)
+					{
+						state.blit_encoder.copy_texture_to_buffer(options.src.backend.mtl.texture, 0, options.mip_level, { .x = (mtl::NSUInteger)options.x, .y = (mtl::NSUInteger)options.y, .z = (mtl::NSUInteger)options.z }, { .width = options.width, .height = options.height, .depth = options.depth }, options.dst.backend.mtl.buffer, options.buffer_offset, row, image);
+					}
+					else
+					{
+						for (uint layer = 0; layer < options.layer_count; layer++)
+						{
+							state.blit_encoder.copy_texture_to_buffer(options.src.backend.mtl.texture, (mtl::NSUInteger)(options.base_array_layer + layer), options.mip_level, { .x = (mtl::NSUInteger)options.x, .y = (mtl::NSUInteger)options.y, .z = 0 }, { .width = options.width, .height = options.height, .depth = 1 }, options.dst.backend.mtl.buffer, options.buffer_offset + (ulong)layer * image, row, image);
+						}
+					}
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_copy_texture_to_buffer_wgpu(c, device, options);
+				{
+					 wgpu_log_text("WebGPU: texture-to-buffer copies are unsupported by the bridge");
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_copy_texture_to_buffer_webgl(c, device, options);
+				{
+				}
 			$endif
 	}
 }
@@ -1050,24 +2053,47 @@ fn void cmd_copy_buffer(Cmd* c, Device* device, Buffer* src, ulong src_offset, B
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_copy_buffer_vk(c, device, src, src_offset, dst, dst_offset, size);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					vk::BufferCopy region = { .srcOffset = src_offset, .dstOffset = dst_offset, .size = size };
+					device.backend.vk.vtable.cmdCopyBuffer(cmd.backend.vk.cmd, src.backend.vk.buffer, dst.backend.vk.buffer, 1, &region);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_copy_buffer_dx12(c, device, src, src_offset, dst, dst_offset, size);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					assert(src != null && dst != null, "buffer copy requires source and destination buffers");
+					assert(src.backend.dx12.resource && dst.backend.dx12.resource, "buffer copy resources must be initialized");
+					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
+					list.vtbl.copy_buffer_region(list, dst.backend.dx12.resource, dst_offset, src.backend.dx12.resource, src_offset, size);
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_copy_buffer_mtl(c, device, src, src_offset, dst, dst_offset, size);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(src != null && dst != null, "buffer copy requires source and destination buffers");
+					assert(src.backend.mtl.buffer && dst.backend.mtl.buffer, "buffer copy resources must be initialized");
+					if (size == 0) return;
+					if (!mtl_begin_blit(state)) return;
+					state.blit_encoder.copy_buffer_to_buffer(src.backend.mtl.buffer, src_offset, dst.backend.mtl.buffer, dst_offset, size);
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_copy_buffer_wgpu(c, device, src, src_offset, dst, dst_offset, size);
+				{
+					if (c.backend.wgpu.encoder != 0 && src != null && dst != null && size <= 0xFFFFFFFF) wgpu_command_encoder_copy_buffer_to_buffer(c.backend.wgpu.encoder, src.backend.wgpu.buffer, (uint)src_offset, dst.backend.wgpu.buffer, (uint)dst_offset, (uint)size);
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_copy_buffer_webgl(c, device, src, src_offset, dst, dst_offset, size);
+				{
+					 WebglCommand* x = webgl_push(c, COPY_BUFFER); if (x != null) { x.src = src; x.dst = dst; x.src_offset = src_offset; x.dst_offset = dst_offset; x.size = size; }
+				}
 			$endif
 	}
 }
@@ -1106,24 +2132,82 @@ fn void cmd_copy_image(Cmd* c, Device* device, Image* src, Image* dst, ImageCopy
 	{
 		case VK:
 			$if HAS_VK:
-				cmd_copy_image_vk(c, device, src, dst, d);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					vk::ImageAspectFlags src_aspect = vk_image_aspect_from_vk_format(src.backend.vk.format, true);
+					vk::ImageAspectFlags dst_aspect = vk_image_aspect_from_vk_format(dst.backend.vk.format, true);
+					vk::ImageCopy region = {
+						.srcSubresource = { .aspectMask = src_aspect, .mipLevel = d.src_mip_level, .baseArrayLayer = d.src_array_layer, .layerCount = 1 },
+						.srcOffset = { .x = d.src_x, .y = d.src_y, .z = d.src_z },
+						.dstSubresource = { .aspectMask = dst_aspect, .mipLevel = d.dst_mip_level, .baseArrayLayer = d.dst_array_layer, .layerCount = 1 },
+						.dstOffset = { .x = d.dst_x, .y = d.dst_y, .z = d.dst_z },
+						.extent = { .width = d.width, .height = d.height, .depth = d.depth },
+					};
+					device.backend.vk.vtable.cmdCopyImage(cmd.backend.vk.cmd, src.backend.vk.image, vk::ImageLayout.TRANSFER_SRC_OPTIMAL, dst.backend.vk.image, vk::ImageLayout.TRANSFER_DST_OPTIMAL, 1, &region);
+				}
 			$endif
 		case DX12:
 			$if HAS_DX12:
-				cmd_copy_image_dx12(c, device, src, dst, d);
+				{
+					Cmd* cmd = c;
+					(void)device;
+					assert(src != null && dst != null, "image copy requires source and destination images");
+					assert(src.backend.dx12.resource && dst.backend.dx12.resource, "image copy resources must be initialized");
+					ImageDx12* s = &src.backend.dx12;
+					ImageDx12* d = &dst.backend.dx12;
+					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
+
+					d3d12::TextureCopyLocation src_loc = {};
+					src_loc.resource = s.resource;
+					src_loc.type = d3d12::TextureCopyType.SUBRESOURCE_INDEX;
+					src_loc.subresource_index = dx12_copy_subresource(s, d.src_mip_level, d.src_array_layer, BarrierAspect.COLOR);
+					d3d12::TextureCopyLocation dst_loc = {};
+					dst_loc.resource = d.resource;
+					dst_loc.type = d3d12::TextureCopyType.SUBRESOURCE_INDEX;
+					dst_loc.subresource_index = dx12_copy_subresource(d, d.dst_mip_level, d.dst_array_layer, BarrierAspect.COLOR);
+
+					// A copy of the whole source subresource passes no box (required for
+					// depth-stencil and multisampled resources).
+					uint mip_width = s.width >> d.src_mip_level;
+					uint mip_height = s.height >> d.src_mip_level;
+					uint mip_depth = s.depth >> d.src_mip_level;
+					if (mip_width == 0) mip_width = 1;
+					if (mip_height == 0) mip_height = 1;
+					if (mip_depth == 0) mip_depth = 1;
+					bool whole = d.src_x == 0 && d.src_y == 0 && d.src_z == 0
+						&& d.width == mip_width && d.height == mip_height && d.depth == mip_depth;
+					d3d12::ResourceBox box = {
+						.left = (uint)d.src_x, .top = (uint)d.src_y, .front = (uint)d.src_z,
+						.right = (uint)d.src_x + d.width, .bottom = (uint)d.src_y + d.height, .back = (uint)d.src_z + d.depth,
+					};
+					list.vtbl.copy_texture_region(list, &dst_loc, (uint)d.dst_x, (uint)d.dst_y, (uint)d.dst_z, &src_loc, whole ? null : &box);
+				}
 			$endif
 		case MTL:
 			$if HAS_MTL:
-				cmd_copy_image_mtl(c, device, src, dst, d);
+				{
+					CmdMtl* state = &c.backend.mtl;
+					assert(src != null && dst != null, "image copy requires source and destination images");
+					assert(src.backend.mtl.texture && dst.backend.mtl.texture, "image copy resources must be initialized");
+					assert(d.width > 0 && d.height > 0 && d.depth > 0, "image copy extent must be nonzero");
+					assert(d.src_x >= 0 && d.src_y >= 0 && d.src_z >= 0 && d.dst_x >= 0 && d.dst_y >= 0 && d.dst_z >= 0, "image copy origins must be nonnegative");
+					if (!mtl_begin_blit(state)) return;
+					state.blit_encoder.copy_texture_to_texture(src.backend.mtl.texture, d.src_array_layer, d.src_mip_level, { .x = (mtl::NSUInteger)d.src_x, .y = (mtl::NSUInteger)d.src_y, .z = (mtl::NSUInteger)d.src_z }, { .width = d.width, .height = d.height, .depth = d.depth }, dst.backend.mtl.texture, d.dst_array_layer, d.dst_mip_level, { .x = (mtl::NSUInteger)d.dst_x, .y = (mtl::NSUInteger)d.dst_y, .z = (mtl::NSUInteger)d.dst_z });
+				}
 			$endif
 			break;
 		case WGPU:
 			$if HAS_WGPU:
-				cmd_copy_image_wgpu(c, device, src, dst, d);
+				{
+					 wgpu_log_text("WebGPU: image copies are unsupported by the bridge");
+				}
 			$endif
 		case WEBGL:
 			$if HAS_WEBGL:
-				cmd_copy_image_webgl(c, device, src, dst, d);
+				{
+					 WebglCommand* x = webgl_push(c, COPY_IMAGE); if (x != null) { x.image = src; x.image_dst = dst; x.image_copy = desc; }
+				}
 			$endif
 	}
 }
@@ -1158,6 +2242,7 @@ fn void mtl_finish_render(CmdMtl* state)
 {
 	if (!state.render_encoder) return;
 	state.render_encoder.end_encoding();
+	state.render_encoder.release();
 	state.render_encoder = null;
 	state.render_active = false;
 }
@@ -1166,36 +2251,24 @@ fn void mtl_finish_blit(CmdMtl* state)
 {
 	if (!state.blit_encoder) return;
 	state.blit_encoder.end_encoding();
+	state.blit_encoder.release();
 	state.blit_encoder = null;
 	state.blit_active = false;
 }
 
-fn bool mtl_require_render(CmdMtl* state)
-{
-	if (state.render_encoder) return true;
-	log::error("Metal: graphics command requires an active render pass");
-	return false;
-}
-
 fn bool mtl_begin_blit(CmdMtl* state)
 {
-	if (state.render_encoder)
-	{
-		log::error("Metal: copy command rejected inside a render pass");
-		return false;
-	}
+	assert(state != null, "copy command requires a command buffer");
+	assert(!state.render_encoder, "copy commands cannot be recorded inside a render pass");
 	if (state.blit_encoder) return true;
-	if (!state.command_buffer)
-	{
-		log::error("Metal: copy command has no command buffer");
-		return false;
-	}
+	assert(state.command_buffer, "copy command requires an active command buffer");
 	state.blit_encoder = state.command_buffer.blit_command_encoder();
 	if (!state.blit_encoder)
 	{
 		log::error("Metal: failed to create blit encoder");
 		return false;
 	}
+	state.blit_encoder.retain();
 	state.blit_active = true;
 	return true;
 }
@@ -1259,322 +2332,29 @@ fn void mtl_copy_layout(Format format, uint width, uint height, uint bytes_per_r
 	*out_image = image;
 }
 
-fn Cmd? cmd_init_mtl(Device* device, Pool* pool)
-{
-	return { .backend.mtl = { .queue = device.backend.mtl.queue } };
-}
 
-fn void cmd_deinit_mtl(Cmd* c, Device* device, Pool* pool)
-{
-	CmdMtl* state = &c.backend.mtl;
-	mtl_finish_render(state);
-	mtl_finish_blit(state);
-	if (state.command_buffer) state.command_buffer.release();
-	*state = {};
-}
 
-fn void? cmd_begin_mtl(Cmd* c, Device* device)
-{
-	CmdMtl* state = &c.backend.mtl;
-	mtl_finish_render(state);
-	mtl_finish_blit(state);
-	if (state.command_buffer) state.command_buffer.release();
-	state.command_buffer = state.queue.command_buffer();
-	if (!state.command_buffer) return INITIALIZATION_FAILED~;
-	state.command_buffer.retain();
-	state.index_buffer = null;
-	state.index_offset = 0;
-	state.render_active = false;
-	state.blit_active = false;
-	return;
-}
 
-fn void? cmd_end_mtl(Cmd* c, Device* device)
-{
-	CmdMtl* state = &c.backend.mtl;
-	mtl_finish_render(state);
-	mtl_finish_blit(state);
-	return;
-}
 
-fn void cmd_set_viewport_mtl(Cmd* c, Device* device, Viewport vp)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (!mtl_require_render(state)) return;
-	state.render_encoder.set_viewport({
-		.origin_x = vp.x, .origin_y = vp.y, .width = vp.width, .height = vp.height,
-		.znear = vp.min_depth, .zfar = vp.max_depth,
-	});
-}
 
-fn void cmd_set_scissor_mtl(Cmd* c, Device* device, Rect rect)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (!mtl_require_render(state)) return;
-	if (rect.x < 0 || rect.y < 0)
-	{
-		log::error("Metal: negative scissor coordinates are unsupported");
-		return;
-	}
-	state.render_encoder.set_scissor_rect({ .x = (mtl::NSUInteger)rect.x, .y = (mtl::NSUInteger)rect.y, .width = rect.width, .height = rect.height });
-}
 
-fn void cmd_draw_mtl(Cmd* c, Device* device, uint vertex_count, uint instance_count, uint first_vertex, uint first_instance)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (!mtl_require_render(state)) return;
-	state.render_encoder.draw_primitives_instanced(state.primitive_type, first_vertex, vertex_count, instance_count, first_instance);
-}
 
-fn void cmd_draw_indexed_mtl(Cmd* c, Device* device, uint index_count, uint instance_count, uint first_index, int vertex_offset, uint first_instance)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (!mtl_require_render(state) || !state.index_buffer)
-	{
-		if (!state.index_buffer) log::error("Metal: indexed draw has no index buffer");
-		return;
-	}
-	uint index_size = state.index_type == mtl::IndexType.UINT16 ? 2 : 4;
-	ulong byte_offset = state.index_offset + (ulong)first_index * index_size;
-	state.render_encoder.draw_indexed_primitives_instanced(state.primitive_type, index_count, state.index_type, state.index_buffer, byte_offset, instance_count, vertex_offset, first_instance);
-}
 
-fn void cmd_draw_indirect_mtl(Cmd* c, Device* device, Buffer* buffer, ulong offset, uint draw_count, uint stride)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (!mtl_require_render(state) || buffer == null || !buffer.backend.mtl.buffer) return;
-	uint draw_stride = stride == 0 ? MTL_DRAW_PRIMITIVE_STRIDE : stride;
-	for (uint i = 0; i < draw_count; i++)
-	{
-		state.render_encoder.draw_primitives_indirect(state.primitive_type, buffer.backend.mtl.buffer, offset + (ulong)i * draw_stride);
-	}
-}
 
-fn void cmd_draw_indexed_indirect_mtl(Cmd* c, Device* device, Buffer* buffer, ulong offset, uint draw_count, uint stride)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (!mtl_require_render(state) || !state.index_buffer || buffer == null || !buffer.backend.mtl.buffer)
-	{
-		if (!state.index_buffer) log::error("Metal: indexed indirect draw has no index buffer");
-		return;
-	}
-	uint draw_stride = stride == 0 ? MTL_DRAW_INDEXED_STRIDE : stride;
-	for (uint i = 0; i < draw_count; i++)
-	{
-		state.render_encoder.draw_indexed_primitives_indirect(state.primitive_type, state.index_type, state.index_buffer, state.index_offset, buffer.backend.mtl.buffer, offset + (ulong)i * draw_stride);
-	}
-}
 
-fn void cmd_draw_indirect_count_mtl(Cmd* c, Device* device, Buffer* buffer, ulong offset, Buffer* count_buffer, ulong count_offset, uint max_draw_count, uint stride)
-{
-	log::error("Metal: indirect-count draw is unsupported; draw dropped");
-}
 
-fn void cmd_bind_pipeline_mtl(Cmd* c, Device* device, Pipeline* pipeline)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (!mtl_require_render(state) || pipeline == null || !pipeline.backend.mtl.state) return;
-	PipelineMtl* p = &pipeline.backend.mtl;
-	state.primitive_type = p.primitive_type;
-	state.render_encoder.set_render_pipeline_state(p.state);
-	state.render_encoder.set_depth_stencil_state(p.depth_stencil);
-	state.render_encoder.set_cull_mode(p.cull_mode);
-	state.render_encoder.set_front_facing_winding(p.winding);
-}
 
-fn void cmd_set_push_constants_mtl(Cmd* c, Device* device, Pipeline* pipeline, char[] bytes)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (!mtl_require_render(state) || bytes.len == 0) return;
-	if (pipeline != null && pipeline.backend.mtl.push_constant_size != 0 && bytes.len > pipeline.backend.mtl.push_constant_size)
-	{
-		log::error("Metal: push constant data exceeds pipeline limit");
-		return;
-	}
-	state.render_encoder.set_vertex_bytes((void*)bytes.ptr, (mtl::NSUInteger)bytes.len, 0);
-	state.render_encoder.set_fragment_bytes((void*)bytes.ptr, (mtl::NSUInteger)bytes.len, 0);
-}
 
-fn void cmd_clear_attachment_regions_mtl(Cmd* c, Device* device, CmdClearRegion[] regions)
-{
-	if (regions.len != 0) log::error("Metal: partial attachment clears are unsupported; clears dropped");
-}
 
-fn void cmd_begin_rendering_mtl(Cmd* c, Device* device, CmdBeginRenderingOptions options)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (!state.command_buffer) { log::error("Metal: render pass has no command buffer"); return; }
-	if (state.render_encoder)
-	{
-		log::error("Metal: render pass already active");
-		return;
-	}
-	mtl_finish_blit(state);
-	objc::@autoreleasepool()
-	{
-		mtl::RenderPassDescriptor desc = mtl::render_pass_descriptor();
-		if (!desc) { log::error("Metal: failed to create render pass descriptor"); return; }
-		mtl::RenderPassColorAttachmentDescriptorArray colors = desc.color_attachments();
-		foreach (i, attachment : options.color_attachments)
-		{
-			if (!attachment.view.backend.mtl.texture) continue;
-			mtl::RenderPassColorAttachmentDescriptor color = colors.object((mtl::NSUInteger)i);
-			color.set_texture(attachment.view.backend.mtl.texture);
-			color.set_load_action(mtl_load_action(attachment.load_op));
-			color.set_store_action(mtl_store_action(attachment.store_op));
-			if (attachment.load_op == CLEAR)
-			{
-				color.set_clear_color({ .red = attachment.clear_color[0], .green = attachment.clear_color[1], .blue = attachment.clear_color[2], .alpha = attachment.clear_color[3] });
-			}
-		}
-		if (options.has_depth_attachment && options.depth_attachment.view.backend.mtl.texture)
-		{
-			CmdDepthAttachment depth = options.depth_attachment;
-			mtl::RenderPassDepthAttachmentDescriptor depth_desc = desc.depth_attachment();
-			depth_desc.set_texture(depth.view.backend.mtl.texture);
-			depth_desc.set_load_action(mtl_load_action(depth.load_op));
-			depth_desc.set_store_action(mtl_store_action(depth.store_op));
-			if (depth.load_op == CLEAR) depth_desc.set_clear_depth(depth.clear_depth);
-			if (depth.has_stencil)
-			{
-				mtl::RenderPassStencilAttachmentDescriptor stencil = desc.stencil_attachment();
-				stencil.set_texture(depth.view.backend.mtl.texture);
-				stencil.set_load_action(mtl_load_action(depth.stencil_load_op));
-				stencil.set_store_action(mtl_store_action(depth.stencil_store_op));
-				if (depth.stencil_load_op == CLEAR) stencil.set_clear_stencil(depth.clear_stencil);
-			}
-		}
-		state.render_encoder = state.command_buffer.render_command_encoder(desc);
-		if (!state.render_encoder)
-		{
-			log::error("Metal: failed to create render encoder");
-			return;
-		}
-		state.render_active = true;
-	};
-}
 
-fn void cmd_end_rendering_mtl(Cmd* c, Device* device)
-{
-	mtl_finish_render(&c.backend.mtl);
-}
 
-fn void cmd_bind_vertex_buffers_mtl(Cmd* c, Device* device, uint first_binding, Buffer*[] buffers, ulong[] offsets)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (!mtl_require_render(state)) return;
-	foreach (i, buffer : buffers)
-	{
-		if (buffer == null || !buffer.backend.mtl.buffer) continue;
-		ulong offset = offsets.len == 0 ? 0 : offsets[i];
-		state.render_encoder.set_vertex_buffer(buffer.backend.mtl.buffer, offset, (mtl::NSUInteger)(MTL_VERTEX_BUFFER_BASE + first_binding + (uint)i));
-	}
-}
-
-fn void cmd_bind_index_buffer_mtl(Cmd* c, Device* device, Buffer* buffer, IndexType index_type, ulong offset)
-{
-	CmdMtl* state = &c.backend.mtl;
-	state.index_buffer = buffer == null ? null : buffer.backend.mtl.buffer;
-	state.index_type = index_type == IndexType.UINT16 ? mtl::IndexType.UINT16 : mtl::IndexType.UINT32;
-	state.index_offset = offset;
-}
 
 // Render-pass load/store handles non-storage transitions; only storage barriers
 // in an open render encoder issue a Metal memory barrier.
-fn void cmd_resource_barrier_mtl(Cmd* c, Device* device, MemoryBarrier[] memory, BufferBarrier[] buffers, ImageBarrier[] images)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (!state.render_encoder) return;
-	if (memory.len == 0 && buffers.len == 0 && images.len == 0) return;
-	bool storage = false;
-	foreach (barrier : memory)
-	{
-		if (barrier.before.storage_read || barrier.before.storage_write || barrier.after.storage_read || barrier.after.storage_write) { storage = true; break; }
-	}
-	if (!storage) foreach (barrier : buffers)
-	{
-		if (barrier.before.storage_read || barrier.before.storage_write || barrier.after.storage_read || barrier.after.storage_write) { storage = true; break; }
-	}
-	if (!storage) foreach (barrier : images)
-	{
-		if (barrier.before.storage_read || barrier.before.storage_write || barrier.after.storage_read || barrier.after.storage_write) { storage = true; break; }
-	}
-	if (!storage) return;
-	mtl::BarrierScope scope = {};
-	if (memory.len != 0 || buffers.len != 0) scope |= mtl::BARRIER_SCOPE_BUFFERS;
-	if (memory.len != 0 || images.len != 0) scope |= mtl::BARRIER_SCOPE_TEXTURES;
-	if (images.len != 0)
-	{
-		foreach (barrier : images)
-		{
-			if (barrier.before.render_target || barrier.after.render_target || barrier.before.depth_write || barrier.after.depth_write)
-			{
-				scope |= mtl::BARRIER_SCOPE_RENDER_TARGETS;
-				break;
-			}
-		}
-	}
-	BarrierStages before = {};
-	BarrierStages after = {};
-	foreach (barrier : memory) { before |= barrier.before_stages; after |= barrier.after_stages; }
-	foreach (barrier : buffers) { before |= barrier.before_stages; after |= barrier.after_stages; }
-	foreach (barrier : images) { before |= barrier.before_stages; after |= barrier.after_stages; }
-	state.render_encoder.memory_barrier(scope, mtl_render_stages(after), mtl_render_stages(before));
-}
 
-fn void cmd_copy_buffer_to_texture_mtl(Cmd* c, Device* device, CmdCopyBufferToTextureOptions options)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (options.src == null || options.dst == null || !options.src.backend.mtl.buffer || !options.dst.backend.mtl.texture || options.width == 0 || options.height == 0 || options.depth == 0 || options.layer_count == 0 || options.x < 0 || options.y < 0 || options.z < 0 || !mtl_begin_blit(state)) return;
-	uint row = 0;
-	uint image = 0;
-	mtl_copy_layout(options.dst.backend.mtl.format, options.width, options.height, options.bytes_per_row, options.bytes_per_image, options.buffer_row_length, options.buffer_image_height, &row, &image);
-	if (options.dst.backend.mtl.image_type == D3)
-	{
-		state.blit_encoder.copy_buffer_to_texture(options.src.backend.mtl.buffer, options.buffer_offset, row, image, { .width = options.width, .height = options.height, .depth = options.depth }, options.dst.backend.mtl.texture, 0, options.mip_level, { .x = (mtl::NSUInteger)options.x, .y = (mtl::NSUInteger)options.y, .z = (mtl::NSUInteger)options.z });
-	}
-	else
-	{
-		for (uint layer = 0; layer < options.layer_count; layer++)
-		{
-			state.blit_encoder.copy_buffer_to_texture(options.src.backend.mtl.buffer, options.buffer_offset + (ulong)layer * image, row, image, { .width = options.width, .height = options.height, .depth = 1 }, options.dst.backend.mtl.texture, (mtl::NSUInteger)(options.base_array_layer + layer), options.mip_level, { .x = (mtl::NSUInteger)options.x, .y = (mtl::NSUInteger)options.y, .z = 0 });
-		}
-	}
-}
 
-fn void cmd_copy_texture_to_buffer_mtl(Cmd* c, Device* device, CmdCopyTextureToBufferOptions options)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (options.src == null || options.dst == null || !options.src.backend.mtl.texture || !options.dst.backend.mtl.buffer || options.width == 0 || options.height == 0 || options.depth == 0 || options.layer_count == 0 || options.x < 0 || options.y < 0 || options.z < 0 || !mtl_begin_blit(state)) return;
-	uint row = 0;
-	uint image = 0;
-	mtl_copy_layout(options.src.backend.mtl.format, options.width, options.height, options.bytes_per_row, options.bytes_per_image, options.buffer_row_length, options.buffer_image_height, &row, &image);
-	if (options.src.backend.mtl.image_type == D3)
-	{
-		state.blit_encoder.copy_texture_to_buffer(options.src.backend.mtl.texture, 0, options.mip_level, { .x = (mtl::NSUInteger)options.x, .y = (mtl::NSUInteger)options.y, .z = (mtl::NSUInteger)options.z }, { .width = options.width, .height = options.height, .depth = options.depth }, options.dst.backend.mtl.buffer, options.buffer_offset, row, image);
-	}
-	else
-	{
-		for (uint layer = 0; layer < options.layer_count; layer++)
-		{
-			state.blit_encoder.copy_texture_to_buffer(options.src.backend.mtl.texture, (mtl::NSUInteger)(options.base_array_layer + layer), options.mip_level, { .x = (mtl::NSUInteger)options.x, .y = (mtl::NSUInteger)options.y, .z = 0 }, { .width = options.width, .height = options.height, .depth = 1 }, options.dst.backend.mtl.buffer, options.buffer_offset + (ulong)layer * image, row, image);
-		}
-	}
-}
 
-fn void cmd_copy_buffer_mtl(Cmd* c, Device* device, Buffer* src, ulong src_offset, Buffer* dst, ulong dst_offset, ulong size)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (src == null || dst == null || !src.backend.mtl.buffer || !dst.backend.mtl.buffer || size == 0 || !mtl_begin_blit(state)) return;
-	state.blit_encoder.copy_buffer_to_buffer(src.backend.mtl.buffer, src_offset, dst.backend.mtl.buffer, dst_offset, size);
-}
 
-fn void cmd_copy_image_mtl(Cmd* c, Device* device, Image* src, Image* dst, ImageCopyDesc desc)
-{
-	CmdMtl* state = &c.backend.mtl;
-	if (src == null || dst == null || !src.backend.mtl.texture || !dst.backend.mtl.texture || desc.width == 0 || desc.height == 0 || desc.depth == 0 || desc.src_x < 0 || desc.src_y < 0 || desc.src_z < 0 || desc.dst_x < 0 || desc.dst_y < 0 || desc.dst_z < 0 || !mtl_begin_blit(state)) return;
-	state.blit_encoder.copy_texture_to_texture(src.backend.mtl.texture, desc.src_array_layer, desc.src_mip_level, { .x = (mtl::NSUInteger)desc.src_x, .y = (mtl::NSUInteger)desc.src_y, .z = (mtl::NSUInteger)desc.src_z }, { .width = desc.width, .height = desc.height, .depth = desc.depth }, dst.backend.mtl.texture, desc.dst_array_layer, desc.dst_mip_level, { .x = (mtl::NSUInteger)desc.dst_x, .y = (mtl::NSUInteger)desc.dst_y, .z = (mtl::NSUInteger)desc.dst_z });
-}
 
 // ---- dx12 ----
 
@@ -1606,114 +2386,26 @@ struct CmdDx12
 	uint vertex_stride;
 }
 
-fn Cmd? cmd_init_dx12(Device* device, Pool* pool)
-{
-	d3d12::Device* dev = device.backend.dx12.device;
-	d3d12::CommandAllocator* allocator = pool.backend.dx12.allocator;
-	if (!dev || !allocator) return INITIALIZATION_FAILED~;
 
-	Guid iid = d3d12::IID_GRAPHICS_COMMAND_LIST;
-	d3d12::GraphicsCommandList* list;
-	dx12_check(dev.vtbl.create_command_list(dev, 0, pool.backend.dx12.type, allocator, null, &iid, (void**)&list))!;
-	// CreateCommandList returns the list open; close it so the first
-	// `cmd_begin_dx12` can Reset it like every later one.
-	if (dxgi::failed(list.vtbl.close(list)))
-	{
-		dxgi::release(list);
-		return INITIALIZATION_FAILED~;
-	}
-	return { .backend.dx12 = { .list = list, .allocator = allocator } };
-}
 
-fn void cmd_deinit_dx12(Cmd* cmd, Device* device, Pool* pool)
-{
-	(void)device;
-	(void)pool;
-	CmdDx12* state = &cmd.backend.dx12;
-	if (state.list) dxgi::release(state.list);
-	*state = {};
-}
 
-fn void? cmd_begin_dx12(Cmd* cmd, Device* device)
-{
-	(void)device;
-	CmdDx12* state = &cmd.backend.dx12;
-	if (!state.list || !state.allocator) return UNKNOWN~;
-	dx12_check(state.list.vtbl.reset(state.list, state.allocator, null))!;
-	state.rtv_count = 0;
-	state.has_dsv = false;
-	state.vertex_stride = 0;
-}
-
-fn void? cmd_end_dx12(Cmd* cmd, Device* device)
-{
-	(void)device;
-	CmdDx12* state = &cmd.backend.dx12;
-	if (!state.list) return UNKNOWN~;
-	dx12_check(state.list.vtbl.close(state.list))!;
-}
 
 // RI viewports are Vulkan-style signed-height (see `Viewport`). D3D12 takes a
 // positive extent anchored at the top-left, so the flipped form
 // {y = far edge, height < 0} becomes {y = y + height, height = -height}.
-fn void cmd_set_viewport_dx12(Cmd* cmd, Device* device, Viewport viewport)
-{
-	(void)device;
-	if (viewport.origin_bottom_left)
-	{
-		log::error("D3D12: bottom-left origin viewports are not supported");
-		return;
-	}
-	d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
-	float y = viewport.y;
-	float height = viewport.height;
-	if (height < 0)
-	{
-		y += height;
-		height = -height;
-	}
-	d3d12::Viewport vp = {
-		.top_left_x = viewport.x,
-		.top_left_y = y,
-		.width = viewport.width,
-		.height = height,
-		.min_depth = viewport.min_depth,
-		.max_depth = viewport.max_depth,
-	};
-	list.vtbl.rs_set_viewports(list, 1, &vp);
-}
 
-fn d3d12::Rect dx12_rect(Rect rect) @local
+fn d3d12::Rect dx12_rect(std::math::geometry::Rect rect) @local
 {
 	return {
-		.left = rect.x,
-		.top = rect.y,
-		.right = rect.x + (int)rect.width,
-		.bottom = rect.y + (int)rect.height,
+		.left = (int)rect.x,
+		.top = (int)rect.y,
+		.right = (int)(rect.x + rect.width),
+		.bottom = (int)(rect.y + rect.height),
 	};
 }
 
-fn void cmd_set_scissor_dx12(Cmd* cmd, Device* device, Rect rect)
-{
-	(void)device;
-	d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
-	d3d12::Rect scissor = dx12_rect(rect);
-	list.vtbl.rs_set_scissor_rects(list, 1, &scissor);
-}
 
-fn void cmd_draw_dx12(Cmd* cmd, Device* device, uint vertex_count, uint instance_count, uint first_vertex, uint first_instance)
-{
-	(void)device;
-	d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
-	list.vtbl.draw_instanced(list, vertex_count, instance_count, first_vertex, first_instance);
-}
 
-fn void cmd_draw_indexed_dx12(Cmd* cmd, Device* device, uint index_count, uint instance_count, uint first_index, int vertex_offset, uint first_instance)
-{
-	(void)device;
-	d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
-	list.vtbl.draw_indexed_instanced(list, index_count, instance_count, first_index, vertex_offset, first_instance);
-}
 
 // The signature for one draw argument layout, created on first use and owned
 // by the device. Null when creation fails.
@@ -1743,182 +2435,16 @@ fn d3d12::CommandSignature* dx12_draw_signature(Device* device, bool indexed) @l
 	return signature;
 }
 
-// ExecuteIndirect walks the argument buffer at the signature's fixed stride; a
-// caller stride that differs is honoured by issuing one draw at a time.
-fn void dx12_draw_indirect(Cmd* cmd, Device* device, Buffer* buffer, ulong offset, uint draw_count, uint stride, bool indexed) @local
-{
-	if (buffer == null || !buffer.backend.dx12.resource || draw_count == 0) return;
-	d3d12::CommandSignature* signature = dx12_draw_signature(device, indexed);
-	if (!signature) return;
-	d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
-	uint natural = indexed ? DX12_DRAW_INDEXED_ARGS_STRIDE : DX12_DRAW_ARGS_STRIDE;
-	if (stride == 0 || stride == natural)
-	{
-		list.vtbl.execute_indirect(list, signature, draw_count, buffer.backend.dx12.resource, offset, null, 0);
-		return;
-	}
-	for (uint i = 0; i < draw_count; i++)
-	{
-		list.vtbl.execute_indirect(list, signature, 1, buffer.backend.dx12.resource, offset + (ulong)i * stride, null, 0);
-	}
-}
-
-fn void cmd_draw_indirect_dx12(Cmd* cmd, Device* device, Buffer* buffer, ulong offset, uint draw_count, uint stride)
-{
-	dx12_draw_indirect(cmd, device, buffer, offset, draw_count, stride, false);
-}
-
-fn void cmd_draw_indexed_indirect_dx12(Cmd* cmd, Device* device, Buffer* buffer, ulong offset, uint draw_count, uint stride)
-{
-	dx12_draw_indirect(cmd, device, buffer, offset, draw_count, stride, true);
-}
-
 // `count_buffer` is the ExecuteIndirect count buffer; it takes a uint32 at
 // `count_offset` and runs min(count, max_draw_count) draws.
-fn void cmd_draw_indirect_count_dx12(Cmd* cmd, Device* device, Buffer* buffer, ulong offset, Buffer* count_buffer, ulong count_offset, uint max_draw_count, uint stride)
-{
-	if (buffer == null || count_buffer == null || !buffer.backend.dx12.resource || !count_buffer.backend.dx12.resource || max_draw_count == 0) return;
-	if (stride != 0 && stride != DX12_DRAW_ARGS_STRIDE)
-	{
-		log::error("D3D12: indirect-count draw requires tightly packed draw arguments; draw dropped");
-		return;
-	}
-	d3d12::CommandSignature* signature = dx12_draw_signature(device, false);
-	if (!signature) return;
-	d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
-	list.vtbl.execute_indirect(list, signature, max_draw_count, buffer.backend.dx12.resource, offset, count_buffer.backend.dx12.resource, count_offset);
-}
 
-fn void cmd_bind_pipeline_dx12(Cmd* cmd, Device* device, Pipeline* pipeline)
-{
-	(void)device;
-	if (pipeline == null || !pipeline.backend.dx12.state) return;
-	CmdDx12* state = &cmd.backend.dx12;
-	PipelineDx12* p = &pipeline.backend.dx12;
-	d3d12::GraphicsCommandList* list = state.list;
-	list.vtbl.set_pipeline_state(list, p.state);
-	list.vtbl.set_graphics_root_signature(list, p.root_signature);
-	list.vtbl.ia_set_primitive_topology(list, p.topology);
-	state.vertex_stride = p.vertex_stride;
-}
 
-fn void cmd_set_push_constants_dx12(Cmd* cmd, Device* device, Pipeline* pipeline, char[] bytes)
-{
-	(void)device;
-	if (pipeline == null || bytes.len == 0) return;
-	PipelineDx12* p = &pipeline.backend.dx12;
-	if (p.push_constant_param == uint::max) return;
-	if (bytes.len > p.push_constant_size)
-	{
-		log::error("D3D12: push constant data exceeds pipeline limit");
-		return;
-	}
-	d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
-	// Root constants are whole 32-bit values; zero-pad a ragged tail.
-	uint count = ((uint)bytes.len + 3) / 4;
-	uint[] values = mem::talloc_array(uint, count);
-	mem::clear(values.ptr, (usz)count * 4);
-	mem::copy(values.ptr, bytes.ptr, bytes.len);
-	list.vtbl.set_graphics_root_32bit_constants(list, p.push_constant_param, count, values.ptr, 0);
-}
 
-fn void cmd_clear_attachment_regions_dx12(Cmd* cmd, Device* device, CmdClearRegion[] regions)
-{
-	(void)device;
-	CmdDx12* state = &cmd.backend.dx12;
-	if (state.rtv_count == 0) return;
-	d3d12::GraphicsCommandList* list = state.list;
-	// Like Vulkan, only color attachment 0 is cleared.
-	foreach (region : regions)
-	{
-		float[4] color = region.color;
-		d3d12::Rect rect = dx12_rect(region.rect);
-		list.vtbl.clear_render_target_view(list, state.rtvs[0], &color, 1, &rect);
-	}
-}
 
-fn void cmd_begin_rendering_dx12(Cmd* cmd, Device* device, CmdBeginRenderingOptions options)
-{
-	(void)device;
-	assert(options.color_attachments.len <= DX12_MAX_RENDER_TARGETS);
-	CmdDx12* state = &cmd.backend.dx12;
-	d3d12::GraphicsCommandList* list = state.list;
-
-	state.rtv_count = (uint)options.color_attachments.len;
-	foreach (i, color : options.color_attachments)
-	{
-		state.rtvs[i] = color.view.backend.dx12.cpu;
-	}
-	state.has_dsv = options.has_depth_attachment;
-	if (state.has_dsv) state.dsv = options.depth_attachment.view.backend.dx12.cpu;
-	list.vtbl.om_set_render_targets(list, state.rtv_count, state.rtv_count > 0 ? &state.rtvs[0] : null, 0, state.has_dsv ? &state.dsv : null);
-
-	// Vulkan clears only inside the render area.
-	d3d12::Rect area = dx12_rect(options.render_area);
-	bool has_area = options.render_area.width != 0 && options.render_area.height != 0;
-	foreach (i, color : options.color_attachments)
-	{
-		if (color.load_op != LoadOp.CLEAR) continue;
-		float[4] clear_color = color.clear_color;
-		list.vtbl.clear_render_target_view(list, state.rtvs[i], &clear_color, has_area ? 1 : 0, has_area ? &area : null);
-	}
-	if (state.has_dsv)
-	{
-		CmdDepthAttachment depth = options.depth_attachment;
-		d3d12::ClearFlags flags = 0;
-		if (depth.load_op == LoadOp.CLEAR && !depth.read_only) flags |= d3d12::CLEAR_FLAG_DEPTH;
-		if (depth.has_stencil && depth.stencil_load_op == LoadOp.CLEAR) flags |= d3d12::CLEAR_FLAG_STENCIL;
-		if (flags != 0)
-		{
-			list.vtbl.clear_depth_stencil_view(list, state.dsv, flags, depth.clear_depth, (char)depth.clear_stencil, has_area ? 1 : 0, has_area ? &area : null);
-		}
-	}
-}
 
 // Store ops need no work: D3D12 render targets are always written back.
-fn void cmd_end_rendering_dx12(Cmd* cmd, Device* device)
-{
-	(void)device;
-	CmdDx12* state = &cmd.backend.dx12;
-	state.rtv_count = 0;
-	state.has_dsv = false;
-}
 
-fn void cmd_bind_vertex_buffers_dx12(Cmd* cmd, Device* device, uint first_binding, Buffer*[] buffers, ulong[] offsets)
-{
-	(void)device;
-	assert(offsets.ptr == null || offsets.len == buffers.len);
-	CmdDx12* state = &cmd.backend.dx12;
-	d3d12::GraphicsCommandList* list = state.list;
-	foreach (i, buffer : buffers)
-	{
-		if (buffer == null || !buffer.backend.dx12.resource) continue;
-		ulong offset = offsets.ptr == null ? 0 : offsets[i];
-		BufferDx12* b = &buffer.backend.dx12;
-		if (offset > b.size) continue;
-		d3d12::VertexBufferView view = {
-			.buffer_location = b.gpu_address + offset,
-			.size_in_bytes = (uint)(b.size - offset),
-			.stride_in_bytes = state.vertex_stride,
-		};
-		list.vtbl.ia_set_vertex_buffers(list, first_binding + (uint)i, 1, &view);
-	}
-}
 
-fn void cmd_bind_index_buffer_dx12(Cmd* cmd, Device* device, Buffer* buffer, IndexType index_type, ulong offset)
-{
-	(void)device;
-	if (buffer == null || !buffer.backend.dx12.resource) return;
-	BufferDx12* b = &buffer.backend.dx12;
-	if (offset > b.size) return;
-	d3d12::IndexBufferView view = {
-		.buffer_location = b.gpu_address + offset,
-		.size_in_bytes = (uint)(b.size - offset),
-		.format = index_type == IndexType.UINT16 ? dxgi::Format.R16_UINT : dxgi::Format.R32_UINT,
-	};
-	d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
-	list.vtbl.ia_set_index_buffer(list, &view);
-}
 
 // Append the barrier `before` -> `after` on `resource` (one subresource, or
 // ALL_SUBRESOURCES) to `out`; nothing when the states need no ordering.
@@ -1945,18 +2471,6 @@ fn uint dx12_emit_barrier(d3d12::ResourceBarrier* out, d3d12::Resource* resource
 	return 1;
 }
 
-// Plane 0 is depth (or color), plane 1 the stencil of a depth-stencil format.
-fn uint dx12_barrier_plane_mask(Format format, BarrierAspect aspect) @local
-{
-	bool stencil = format_get_props(format).is_stencil;
-	switch (aspect)
-	{
-		case STENCIL: return 0b10;
-		case DEPTH_STENCIL: return stencil ? 0b11 : 0b01;
-		default: return 0b01;
-	}
-}
-
 // True when the barrier covers every subresource of the image.
 fn bool dx12_image_barrier_whole(ImageDx12* image, ImageBarrier barrier) @local
 {
@@ -1971,71 +2485,6 @@ fn bool dx12_image_barrier_whole(ImageDx12* image, ImageBarrier barrier) @local
 // resource when the translated state stays UAV/acceleration structure.
 // Buffer barriers skip UPLOAD/READBACK heap buffers, whose state is fixed.
 // Image barriers name the whole resource unless the range narrows it.
-fn void cmd_resource_barrier_dx12(Cmd* cmd, Device* device, MemoryBarrier[] memory, BufferBarrier[] buffers, ImageBarrier[] images)
-{
-	(void)device;
-	d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
-	d3d12::ResourceBarrier[] barriers = mem::talloc_array(d3d12::ResourceBarrier, memory.len + buffers.len + images.len);
-	uint count = 0;
-	foreach (m : memory)
-	{
-		d3d12::ResourceStates before = dx12_resource_states(m.before, m.before_stages);
-		d3d12::ResourceStates after = dx12_resource_states(m.after, m.after_stages);
-		if (dx12_barrier_kind(before, after) != Dx12BarrierKind.UAV) continue;
-		d3d12::ResourceBarrier b = {};
-		b.type = d3d12::ResourceBarrierType.UAV;
-		b.flags = d3d12::RESOURCE_BARRIER_FLAG_NONE;
-		b.uav.resource = null;
-		barriers[count++] = b;
-	}
-	foreach (b : buffers)
-	{
-		if (b.buffer == null || !b.buffer.backend.dx12.resource) continue;
-		if (b.buffer.backend.dx12.heap_type != d3d12::HeapType.DEFAULT) continue;
-		d3d12::ResourceStates before = dx12_resource_states(b.before, b.before_stages);
-		d3d12::ResourceStates after = dx12_resource_states(b.after, b.after_stages);
-		count += dx12_emit_barrier(&barriers[count], b.buffer.backend.dx12.resource, d3d12::RESOURCE_BARRIER_ALL_SUBRESOURCES, before, after);
-	}
-	// Partially-covered images expand to one barrier per subresource, so they
-	// are flushed on their own below.
-	foreach (b : images)
-	{
-		if (b.image == null || !b.image.backend.dx12.resource) continue;
-		ImageDx12* image = &b.image.backend.dx12;
-		if (!dx12_image_barrier_whole(image, b)) continue;
-		d3d12::ResourceStates before = dx12_resource_states(b.before, b.before_stages);
-		d3d12::ResourceStates after = dx12_resource_states(b.after, b.after_stages);
-		count += dx12_emit_barrier(&barriers[count], image.resource, d3d12::RESOURCE_BARRIER_ALL_SUBRESOURCES, before, after);
-	}
-	if (count > 0) list.vtbl.resource_barrier(list, count, barriers.ptr);
-
-	foreach (b : images)
-	{
-		if (b.image == null || !b.image.backend.dx12.resource) continue;
-		ImageDx12* image = &b.image.backend.dx12;
-		if (dx12_image_barrier_whole(image, b)) continue;
-		d3d12::ResourceStates before = dx12_resource_states(b.before, b.before_stages);
-		d3d12::ResourceStates after = dx12_resource_states(b.after, b.after_stages);
-		uint mips = b.mip_count == 0 ? image.mip_levels - b.base_mip : b.mip_count;
-		uint layers = b.layer_count == 0 ? image.array_layers - b.base_layer : b.layer_count;
-		uint planes = dx12_barrier_plane_mask(image.format, b.aspect);
-		d3d12::ResourceBarrier[] subresources = mem::talloc_array(d3d12::ResourceBarrier, (usz)mips * layers * 2);
-		uint n = 0;
-		for (uint plane = 0; plane < 2; plane++)
-		{
-			if ((planes & (1u << plane)) == 0) continue;
-			for (uint layer = b.base_layer; layer < b.base_layer + layers; layer++)
-			{
-				for (uint mip = b.base_mip; mip < b.base_mip + mips; mip++)
-				{
-					uint index = mip + (layer + plane * image.array_layers) * image.mip_levels;
-					n += dx12_emit_barrier(&subresources[n], image.resource, index, before, after);
-				}
-			}
-		}
-		if (n > 0) list.vtbl.resource_barrier(list, n, subresources.ptr);
-	}
-}
 
 // Format used by a PLACED_FOOTPRINT: depth planes are copied as their
 // shader-readable single-plane equivalents.
@@ -2065,13 +2514,11 @@ fn void dx12_copy_buffer_image(
 	uint mip_level, uint base_layer, uint layer_count, BarrierAspect aspect,
 	int x, int y, int z, uint width, uint height, uint depth) @local
 {
-	if (buffer == null || img == null || !buffer.backend.dx12.resource || !img.backend.dx12.resource) return;
-	if (width == 0 || height == 0 || depth == 0) return;
-	if (bytes_per_row % d3d12::TEXTURE_DATA_PITCH_ALIGNMENT != 0 || buffer_offset % d3d12::TEXTURE_DATA_PLACEMENT_ALIGNMENT != 0)
-	{
-		log::error("D3D12: buffer/texture copy needs 256-byte row pitch and 512-byte offset alignment; copy dropped");
-		return;
-	}
+	assert(buffer != null && img != null, "buffer-image copy requires a buffer and image");
+	assert(buffer.backend.dx12.resource && img.backend.dx12.resource, "buffer-image copy resources must be initialized");
+	assert(width > 0 && height > 0 && depth > 0, "buffer-image copy extent must be nonzero");
+	assert(bytes_per_row % d3d12::TEXTURE_DATA_PITCH_ALIGNMENT == 0 && buffer_offset % d3d12::TEXTURE_DATA_PLACEMENT_ALIGNMENT == 0,
+		"D3D12 buffer-image copies require 256-byte row pitch and 512-byte offset alignment");
 	ImageDx12* image = &img.backend.dx12;
 	d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
 	if (layer_count == 0) layer_count = 1;
@@ -2113,67 +2560,9 @@ fn void dx12_copy_buffer_image(
 	}
 }
 
-fn void cmd_copy_buffer_to_texture_dx12(Cmd* cmd, Device* device, CmdCopyBufferToTextureOptions options)
-{
-	(void)device;
-	dx12_copy_buffer_image(
-		cmd, options.src, options.dst, true,
-		options.buffer_offset, options.bytes_per_row, options.bytes_per_image,
-		options.mip_level, options.base_array_layer, options.layer_count, options.aspect,
-		options.x, options.y, options.z, options.width, options.height, options.depth);
-}
 
-fn void cmd_copy_texture_to_buffer_dx12(Cmd* cmd, Device* device, CmdCopyTextureToBufferOptions options)
-{
-	(void)device;
-	dx12_copy_buffer_image(
-		cmd, options.dst, options.src, false,
-		options.buffer_offset, options.bytes_per_row, options.bytes_per_image,
-		options.mip_level, options.base_array_layer, options.layer_count, options.aspect,
-		options.x, options.y, options.z, options.width, options.height, options.depth);
-}
 
-fn void cmd_copy_buffer_dx12(Cmd* cmd, Device* device, Buffer* src, ulong src_offset, Buffer* dst, ulong dst_offset, ulong size)
-{
-	(void)device;
-	if (src == null || dst == null || !src.backend.dx12.resource || !dst.backend.dx12.resource) return;
-	d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
-	list.vtbl.copy_buffer_region(list, dst.backend.dx12.resource, dst_offset, src.backend.dx12.resource, src_offset, size);
-}
 
-fn void cmd_copy_image_dx12(Cmd* cmd, Device* device, Image* src, Image* dst, ImageCopyDesc desc)
-{
-	(void)device;
-	if (src == null || dst == null || !src.backend.dx12.resource || !dst.backend.dx12.resource) return;
-	ImageDx12* s = &src.backend.dx12;
-	ImageDx12* d = &dst.backend.dx12;
-	d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
-
-	d3d12::TextureCopyLocation src_loc = {};
-	src_loc.resource = s.resource;
-	src_loc.type = d3d12::TextureCopyType.SUBRESOURCE_INDEX;
-	src_loc.subresource_index = dx12_copy_subresource(s, desc.src_mip_level, desc.src_array_layer, BarrierAspect.COLOR);
-	d3d12::TextureCopyLocation dst_loc = {};
-	dst_loc.resource = d.resource;
-	dst_loc.type = d3d12::TextureCopyType.SUBRESOURCE_INDEX;
-	dst_loc.subresource_index = dx12_copy_subresource(d, desc.dst_mip_level, desc.dst_array_layer, BarrierAspect.COLOR);
-
-	// A copy of the whole source subresource passes no box (required for
-	// depth-stencil and multisampled resources).
-	uint mip_width = s.width >> desc.src_mip_level;
-	uint mip_height = s.height >> desc.src_mip_level;
-	uint mip_depth = s.depth >> desc.src_mip_level;
-	if (mip_width == 0) mip_width = 1;
-	if (mip_height == 0) mip_height = 1;
-	if (mip_depth == 0) mip_depth = 1;
-	bool whole = desc.src_x == 0 && desc.src_y == 0 && desc.src_z == 0
-		&& desc.width == mip_width && desc.height == mip_height && desc.depth == mip_depth;
-	d3d12::ResourceBox box = {
-		.left = (uint)desc.src_x, .top = (uint)desc.src_y, .front = (uint)desc.src_z,
-		.right = (uint)desc.src_x + desc.width, .bottom = (uint)desc.src_y + desc.height, .back = (uint)desc.src_z + desc.depth,
-	};
-	list.vtbl.copy_texture_region(list, &dst_loc, (uint)desc.dst_x, (uint)desc.dst_y, (uint)desc.dst_z, &src_loc, whole ? null : &box);
-}
 
 // ---- vulkan ----
 
@@ -2186,92 +2575,15 @@ struct CmdVk
 	vk::CommandBuffer cmd;
 }
 
-fn Cmd? cmd_init_vk(Device* device, Pool* pool)
-{
-	vk::CommandBufferAllocateInfo info = {
-		.sType = vk::StructureType.COMMAND_BUFFER_ALLOCATE_INFO,
-		.commandPool = pool.backend.vk.pool,
-		.level = vk::CommandBufferLevel.PRIMARY,
-		.commandBufferCount = 1,
-	};
-	vk::CommandBuffer command_buffer;
-	vk_check(device.backend.vk.vtable.allocateCommandBuffers(device.backend.vk.device, &info, &command_buffer))!;
-	return { .backend.vk = { .cmd = command_buffer } };
-}
 
-fn void cmd_deinit_vk(Cmd* cmd, Device* device, Pool* pool)
-{
-	device.backend.vk.vtable.freeCommandBuffers(device.backend.vk.device, pool.backend.vk.pool, 1, &cmd.backend.vk.cmd);
-	cmd.backend.vk = {};
-}
 
-fn void? cmd_begin_vk(Cmd* cmd, Device* device)
-{
-	vk::CommandBufferBeginInfo info = {
-		.sType = vk::StructureType.COMMAND_BUFFER_BEGIN_INFO,
-		.flags = vk::COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-	};
-	return vk_check(device.backend.vk.vtable.beginCommandBuffer(cmd.backend.vk.cmd, &info));
-}
 
-fn void? cmd_end_vk(Cmd* cmd, Device* device)
-{
-	return vk_check(device.backend.vk.vtable.endCommandBuffer(cmd.backend.vk.cmd));
-}
 
-fn void cmd_set_viewport_vk(Cmd* cmd, Device* device, Viewport viewport)
-{
-	(void)device;
-	vk::Viewport vk_viewport = {
-		.x = viewport.x,
-		.y = viewport.y,
-		.width = viewport.width,
-		.height = viewport.height,
-		.minDepth = viewport.min_depth,
-		.maxDepth = viewport.max_depth,
-	};
-	device.backend.vk.vtable.cmdSetViewport(cmd.backend.vk.cmd, 0, 1, &vk_viewport);
-}
 
-fn void cmd_set_scissor_vk(Cmd* cmd, Device* device, Rect rect)
-{
-	(void)device;
-	vk::Rect2D scissor = {
-		.offset = { .x = rect.x, .y = rect.y },
-		.extent = { .width = rect.width, .height = rect.height },
-	};
-	device.backend.vk.vtable.cmdSetScissor(cmd.backend.vk.cmd, 0, 1, &scissor);
-}
 
-fn void cmd_draw_vk(Cmd* cmd, Device* device, uint vertex_count, uint instance_count, uint first_vertex, uint first_instance)
-{
-	(void)device;
-	device.backend.vk.vtable.cmdDraw(cmd.backend.vk.cmd, vertex_count, instance_count, first_vertex, first_instance);
-}
 
-fn void cmd_draw_indexed_vk(Cmd* cmd, Device* device, uint index_count, uint instance_count, uint first_index, int vertex_offset, uint first_instance)
-{
-	(void)device;
-	device.backend.vk.vtable.cmdDrawIndexed(cmd.backend.vk.cmd, index_count, instance_count, first_index, vertex_offset, first_instance);
-}
 
-fn void cmd_draw_indirect_vk(Cmd* cmd, Device* device, Buffer* buffer, ulong offset, uint draw_count, uint stride)
-{
-	(void)device;
-	device.backend.vk.vtable.cmdDrawIndirect(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, draw_count, stride);
-}
 
-fn void cmd_draw_indexed_indirect_vk(Cmd* cmd, Device* device, Buffer* buffer, ulong offset, uint draw_count, uint stride)
-{
-	(void)device;
-	device.backend.vk.vtable.cmdDrawIndexedIndirect(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, draw_count, stride);
-}
-
-fn void cmd_draw_indirect_count_vk(Cmd* cmd, Device* device, Buffer* buffer, ulong offset, Buffer* count_buffer, ulong count_offset, uint max_draw_count, uint stride)
-{
-	(void)device;
-	device.backend.vk.vtable.cmdDrawIndirectCount(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, count_buffer.backend.vk.buffer, count_offset, max_draw_count, stride);
-}
 
 fn void cmd_draw_indexed_indirect_count_vk(Cmd* cmd, Device* device, Buffer* buffer, ulong offset, Buffer* count_buffer, ulong count_offset, uint max_draw_count, uint stride)
 {
@@ -2279,39 +2591,8 @@ fn void cmd_draw_indexed_indirect_count_vk(Cmd* cmd, Device* device, Buffer* buf
 	device.backend.vk.vtable.cmdDrawIndexedIndirectCount(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, count_buffer.backend.vk.buffer, count_offset, max_draw_count, stride);
 }
 
-fn void cmd_bind_pipeline_vk(Cmd* cmd, Device* device, Pipeline* pipeline)
-{
-	(void)device;
-	device.backend.vk.vtable.cmdBindPipeline(cmd.backend.vk.cmd, vk::PipelineBindPoint.GRAPHICS, pipeline.backend.vk.pipeline);
-}
 
-fn void cmd_set_push_constants_vk(Cmd* cmd, Device* device, Pipeline* pipeline, char[] bytes)
-{
-	(void)device;
-	device.backend.vk.vtable.cmdPushConstants(cmd.backend.vk.cmd, pipeline.backend.vk.layout, vk::SHADER_STAGE_VERTEX_BIT, 0, (uint)bytes.len, bytes.ptr);
-}
 
-fn void cmd_clear_attachment_regions_vk(Cmd* cmd, Device* device, CmdClearRegion[] regions)
-{
-	(void)device;
-	foreach (region : regions)
-	{
-		vk::ClearAttachment attachment = {
-			.aspectMask = vk::IMAGE_ASPECT_COLOR_BIT,
-			.colorAttachment = 0,
-			.clearValue = { .color = { .float32 = region.color } },
-		};
-		vk::ClearRect rect = {
-			.rect = {
-				.offset = { .x = region.rect.x, .y = region.rect.y },
-				.extent = { .width = region.rect.width, .height = region.rect.height },
-			},
-			.baseArrayLayer = 0,
-			.layerCount = 1,
-		};
-		device.backend.vk.vtable.cmdClearAttachments(cmd.backend.vk.cmd, 1, &attachment, 1, &rect);
-	}
-}
 
 fn vk::AttachmentLoadOp vk_load_op(LoadOp op) @private
 {
@@ -2330,122 +2611,6 @@ fn vk::AttachmentStoreOp vk_store_op(StoreOp op) @private
 		case STORE: return vk::AttachmentStoreOp.STORE;
 		case DONT_CARE: return vk::AttachmentStoreOp.DONT_CARE;
 	}
-}
-
-fn void cmd_begin_rendering_vk(Cmd* cmd, Device* device, CmdBeginRenderingOptions options)
-{
-	(void)device;
-	assert(options.color_attachments.len <= 8);
-	vk::RenderingAttachmentInfo[8] colors;
-	foreach (i, color : options.color_attachments)
-	{
-		colors[i] = {
-			.sType = vk::StructureType.RENDERING_ATTACHMENT_INFO,
-			.imageView = color.view.backend.vk.view,
-			.imageLayout = vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
-			.loadOp = vk_load_op(color.load_op),
-			.storeOp = vk_store_op(color.store_op),
-			.clearValue = { .color = { .float32 = color.clear_color } },
-		};
-	}
-	vk::RenderingAttachmentInfo depth;
-	vk::RenderingAttachmentInfo stencil;
-	vk::RenderingInfo info = {
-		.sType = vk::StructureType.RENDERING_INFO,
-		.renderArea = {
-			.offset = { .x = options.render_area.x, .y = options.render_area.y },
-			.extent = { .width = options.render_area.width, .height = options.render_area.height },
-		},
-		.layerCount = 1,
-		.colorAttachmentCount = (uint)options.color_attachments.len,
-		.pColorAttachments = &colors[0],
-	};
-	if (options.has_depth_attachment)
-	{
-		CmdDepthAttachment d = options.depth_attachment;
-		depth = {
-			.sType = vk::StructureType.RENDERING_ATTACHMENT_INFO,
-			.imageView = d.view.backend.vk.view,
-			.imageLayout = d.read_only ? vk::ImageLayout.DEPTH_READ_ONLY_OPTIMAL : vk::ImageLayout.DEPTH_ATTACHMENT_OPTIMAL,
-			.loadOp = vk_load_op(d.load_op),
-			.storeOp = vk_store_op(d.store_op),
-			.clearValue = { .depthStencil = { .depth = d.clear_depth, .stencil = 0 } },
-		};
-		info.pDepthAttachment = &depth;
-		if (d.has_stencil)
-		{
-			stencil = {
-				.sType = vk::StructureType.RENDERING_ATTACHMENT_INFO,
-				.imageView = d.view.backend.vk.view,
-				.imageLayout = vk::ImageLayout.STENCIL_ATTACHMENT_OPTIMAL,
-				.loadOp = vk_load_op(d.stencil_load_op),
-				.storeOp = vk_store_op(d.stencil_store_op),
-				.clearValue = { .depthStencil = { .depth = d.clear_depth, .stencil = d.clear_stencil } },
-			};
-			info.pStencilAttachment = &stencil;
-		}
-	}
-	device.backend.vk.vtable.cmdBeginRendering(cmd.backend.vk.cmd, &info);
-}
-
-fn void cmd_end_rendering_vk(Cmd* cmd, Device* device)
-{
-	(void)device;
-	device.backend.vk.vtable.cmdEndRendering(cmd.backend.vk.cmd);
-}
-
-fn void cmd_bind_vertex_buffers_vk(Cmd* cmd, Device* device, uint first_binding, Buffer*[] buffers, ulong[] offsets)
-{
-	(void)device;
-	assert(buffers.len <= 32);
-	assert(offsets.ptr == null || offsets.len == buffers.len);
-	if (buffers.len == 0) return;
-	vk::Buffer[32] vk_buffers;
-	vk::DeviceSize[32] vk_offsets;
-	foreach (i, buffer : buffers)
-	{
-		if (buffer != null) vk_buffers[i] = buffer.backend.vk.buffer;
-		if (offsets.ptr != null) vk_offsets[i] = offsets[i];
-	}
-	uint start = 0;
-	while (start < buffers.len)
-	{
-		while (start < buffers.len && buffers[start] == null) start++;
-		if (start == buffers.len) break;
-		uint end = start + 1;
-		while (end < buffers.len && buffers[end] != null) end++;
-		device.backend.vk.vtable.cmdBindVertexBuffers(cmd.backend.vk.cmd, first_binding + start, end - start, &vk_buffers[start], &vk_offsets[start]);
-		start = end;
-	}
-}
-
-fn void cmd_bind_index_buffer_vk(Cmd* cmd, Device* device, Buffer* buffer, IndexType index_type, ulong offset)
-{
-	(void)device;
-	vk::IndexType vk_index_type = index_type == UINT16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32;
-	device.backend.vk.vtable.cmdBindIndexBuffer(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, vk_index_type);
-}
-
-fn void cmd_copy_buffer_vk(Cmd* cmd, Device* device, Buffer* src, ulong src_offset, Buffer* dst, ulong dst_offset, ulong size)
-{
-	(void)device;
-	vk::BufferCopy region = { .srcOffset = src_offset, .dstOffset = dst_offset, .size = size };
-	device.backend.vk.vtable.cmdCopyBuffer(cmd.backend.vk.cmd, src.backend.vk.buffer, dst.backend.vk.buffer, 1, &region);
-}
-
-fn void cmd_copy_image_vk(Cmd* cmd, Device* device, Image* src, Image* dst, ImageCopyDesc desc)
-{
-	(void)device;
-	vk::ImageAspectFlags src_aspect = vk_image_aspect_from_vk_format(src.backend.vk.format, true);
-	vk::ImageAspectFlags dst_aspect = vk_image_aspect_from_vk_format(dst.backend.vk.format, true);
-	vk::ImageCopy region = {
-		.srcSubresource = { .aspectMask = src_aspect, .mipLevel = desc.src_mip_level, .baseArrayLayer = desc.src_array_layer, .layerCount = 1 },
-		.srcOffset = { .x = desc.src_x, .y = desc.src_y, .z = desc.src_z },
-		.dstSubresource = { .aspectMask = dst_aspect, .mipLevel = desc.dst_mip_level, .baseArrayLayer = desc.dst_array_layer, .layerCount = 1 },
-		.dstOffset = { .x = desc.dst_x, .y = desc.dst_y, .z = desc.dst_z },
-		.extent = { .width = desc.width, .height = desc.height, .depth = desc.depth },
-	};
-	device.backend.vk.vtable.cmdCopyImage(cmd.backend.vk.cmd, src.backend.vk.image, vk::ImageLayout.TRANSFER_SRC_OPTIMAL, dst.backend.vk.image, vk::ImageLayout.TRANSFER_DST_OPTIMAL, 1, &region);
 }
 
 const ResourceState VK_GENERAL_LAYOUT_STATES = {
@@ -2483,7 +2648,7 @@ fn vk::ImageLayout vk_resource_state_to_image_layout(ResourceState state) @priva
 	if (state.shader_resource) return vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL;
 	if (state.copy_src) return vk::ImageLayout.TRANSFER_SRC_OPTIMAL;
 	if (state.copy_dst) return vk::ImageLayout.TRANSFER_DST_OPTIMAL;
-	if (state.present) return vk::ImageLayout.PRESENT_SRC_KHR;
+	if (state.present) return (vk::ImageLayout)1000001002;
 	return vk::ImageLayout.UNDEFINED;
 }
 
@@ -2614,108 +2779,4 @@ fn vk::ImageAspectFlags vk_barrier_aspect(BarrierAspect aspect) @private
 		case STENCIL: return vk::IMAGE_ASPECT_STENCIL_BIT;
 		case DEPTH_STENCIL: return vk::IMAGE_ASPECT_DEPTH_BIT | vk::IMAGE_ASPECT_STENCIL_BIT;
 	}
-}
-
-fn void cmd_resource_barrier_vk(Cmd* cmd, Device* device, MemoryBarrier[] memory, BufferBarrier[] buffers, ImageBarrier[] images)
-{
-	VkStageMaskResult source;
-	VkStageMaskResult destination;
-	vk::MemoryBarrier2[] vk_memory = mem::temp_array(vk::MemoryBarrier2, memory.len);
-	vk::BufferMemoryBarrier2[] vk_buffers = mem::temp_array(vk::BufferMemoryBarrier2, buffers.len);
-	vk::ImageMemoryBarrier2[] vk_images = mem::temp_array(vk::ImageMemoryBarrier2, images.len);
-	uint memory_count;
-	uint buffer_count;
-	uint image_count;
-	foreach (barrier : memory)
-	{
-		source = vk_stage_bits_to_vk(barrier.before_stages, barrier.before, cmd.barrier_capabilities);
-		destination = vk_stage_bits_to_vk(barrier.after_stages, barrier.after, cmd.barrier_capabilities);
-		if (!source.ok || !destination.ok) { log::error("rhi: unsupported memory barrier; skipped"); continue; }
-		vk_memory[memory_count] = { .sType = vk::StructureType.MEMORY_BARRIER_2, .srcStageMask = source.mask, .srcAccessMask = vk_resource_state_to_access(barrier.before), .dstStageMask = destination.mask, .dstAccessMask = vk_resource_state_to_access(barrier.after) };
-		memory_count++;
-	}
-	foreach (barrier : buffers)
-	{
-		source = vk_stage_bits_to_vk(barrier.before_stages, barrier.before, cmd.barrier_capabilities);
-		destination = vk_stage_bits_to_vk(barrier.after_stages, barrier.after, cmd.barrier_capabilities);
-		if (!source.ok || !destination.ok) { log::error("rhi: unsupported buffer barrier; skipped"); continue; }
-		vk_buffers[buffer_count] = {
-			.sType = vk::StructureType.BUFFER_MEMORY_BARRIER_2,
-			.srcStageMask = source.mask,
-			.srcAccessMask = vk_resource_state_to_access(barrier.before),
-			.dstStageMask = destination.mask,
-			.dstAccessMask = vk_resource_state_to_access(barrier.after),
-			.srcQueueFamilyIndex = vk::QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = vk::QUEUE_FAMILY_IGNORED,
-			.buffer = barrier.buffer.backend.vk.buffer,
-			.offset = barrier.offset,
-			.size = barrier.size == 0 ? vk::WHOLE_SIZE : barrier.size,
-		};
-		buffer_count++;
-	}
-	foreach (barrier : images)
-	{
-		source = vk_stage_bits_to_vk(barrier.before_stages, barrier.before, cmd.barrier_capabilities);
-		destination = vk_stage_bits_to_vk(barrier.after_stages, barrier.after, cmd.barrier_capabilities);
-		if (!source.ok || !destination.ok) { log::error("rhi: unsupported image barrier; skipped"); continue; }
-		vk_images[image_count] = {
-			.sType = vk::StructureType.IMAGE_MEMORY_BARRIER_2,
-			.srcStageMask = source.mask,
-			.srcAccessMask = vk_resource_state_to_access(barrier.before),
-			.dstStageMask = destination.mask,
-			.dstAccessMask = vk_resource_state_to_access(barrier.after),
-			.oldLayout = vk_resource_state_to_image_layout_aspect(barrier.before, barrier.aspect),
-			.newLayout = vk_resource_state_to_image_layout_aspect(barrier.after, barrier.aspect),
-			.srcQueueFamilyIndex = vk::QUEUE_FAMILY_IGNORED,
-			.dstQueueFamilyIndex = vk::QUEUE_FAMILY_IGNORED,
-			.image = barrier.image.backend.vk.image,
-			.subresourceRange = {
-				.aspectMask = vk_barrier_aspect(barrier.aspect),
-				.baseMipLevel = barrier.base_mip,
-				.levelCount = barrier.mip_count == 0 ? vk::REMAINING_MIP_LEVELS : barrier.mip_count,
-				.baseArrayLayer = barrier.base_layer,
-				.layerCount = barrier.layer_count == 0 ? vk::REMAINING_ARRAY_LAYERS : barrier.layer_count,
-			},
-		};
-		image_count++;
-	}
-	if (memory_count + buffer_count + image_count == 0) return;
-	vk::DependencyInfo dependency = {
-		.sType = vk::StructureType.DEPENDENCY_INFO,
-		.memoryBarrierCount = memory_count,
-		.pMemoryBarriers = vk_memory.ptr,
-		.bufferMemoryBarrierCount = buffer_count,
-		.pBufferMemoryBarriers = vk_buffers.ptr,
-		.imageMemoryBarrierCount = image_count,
-		.pImageMemoryBarriers = vk_images.ptr,
-	};
-	device.backend.vk.vtable.cmdPipelineBarrier2(cmd.backend.vk.cmd, &dependency);
-}
-
-fn void cmd_copy_buffer_to_texture_vk(Cmd* cmd, Device* device, CmdCopyBufferToTextureOptions options)
-{
-	(void)device;
-	vk::BufferImageCopy region = {
-		.bufferOffset = options.buffer_offset,
-		.bufferRowLength = options.buffer_row_length,
-		.bufferImageHeight = options.buffer_image_height,
-		.imageSubresource = { .aspectMask = vk_barrier_aspect(options.aspect), .mipLevel = options.mip_level, .baseArrayLayer = options.base_array_layer, .layerCount = options.layer_count },
-		.imageOffset = { .x = options.x, .y = options.y, .z = options.z },
-		.imageExtent = { .width = options.width, .height = options.height, .depth = options.depth },
-	};
-	device.backend.vk.vtable.cmdCopyBufferToImage(cmd.backend.vk.cmd, options.src.backend.vk.buffer, options.dst.backend.vk.image, vk::ImageLayout.TRANSFER_DST_OPTIMAL, 1, &region);
-}
-
-fn void cmd_copy_texture_to_buffer_vk(Cmd* cmd, Device* device, CmdCopyTextureToBufferOptions options)
-{
-	(void)device;
-	vk::BufferImageCopy region = {
-		.bufferOffset = options.buffer_offset,
-		.bufferRowLength = options.buffer_row_length,
-		.bufferImageHeight = options.buffer_image_height,
-		.imageSubresource = { .aspectMask = vk_barrier_aspect(options.aspect), .mipLevel = options.mip_level, .baseArrayLayer = options.base_array_layer, .layerCount = options.layer_count },
-		.imageOffset = { .x = options.x, .y = options.y, .z = options.z },
-		.imageExtent = { .width = options.width, .height = options.height, .depth = options.depth },
-	};
-	device.backend.vk.vtable.cmdCopyImageToBuffer(cmd.backend.vk.cmd, options.src.backend.vk.image, vk::ImageLayout.TRANSFER_SRC_OPTIMAL, options.dst.backend.vk.buffer, 1, &region);
 }
