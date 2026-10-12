@@ -1,0 +1,9 @@
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "platform.c3",
+    "web/index.html",
+    "web/glue.js",
+    "web/webgl_glue.js",
+    "web/bundle_test.mjs",
+])

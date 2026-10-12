@@ -5,7 +5,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>rhi {{WASM_NAME}}</title>
+<title>rhi @EXAMPLE@</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
   #canvas { display: block; width: 100vw; height: 100vh; }
@@ -37,14 +37,14 @@
   const forceBackend = requested === "webgl" || requested === "webgpu" ? requested : undefined;
 
   try {
-    const app = await boot("./{{WASM_NAME}}.wasm", { canvas: "#canvas", forceBackend, log: console });
+    const app = await boot("./@WASM_NAME@.wasm", { canvas: "#canvas", forceBackend, log: console });
     const name = app.backend === "webgpu" ? "WebGPU" : "WebGL2";
-    document.title = `rhi {{WASM_NAME}} (${name})`;
+    document.title = `rhi @EXAMPLE@ (${name})`;
     logLine(`backend: ${name}`);
   } catch (e) {
     const message = e && e.message ? e.message : String(e);
     console.error("[rhi] boot failed:", e);
-    document.title = "rhi {{WASM_NAME}} (failed)";
+    document.title = "rhi @EXAMPLE@ (failed)";
     logLine(`boot failed: ${message}`, "error");
   }
 </script>

@@ -23,7 +23,7 @@ fn vk::Bool32 vk_swapchain_test_messenger_callback(
 	void* user_data)
 {
 	VkSwapchainTestValidation* validation = (VkSwapchainTestValidation*)user_data;
-	if (message_severity & vk::DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+	if (message_severity & vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
 	{
 		atomic::fetch_add(&validation.errors, 1u);
 		if (callback_data && callback_data.pMessage)
@@ -31,7 +31,7 @@ fn vk::Bool32 vk_swapchain_test_messenger_callback(
 			log::error("VK ERROR: %s", callback_data.pMessage);
 		}
 	}
-	else if (message_severity & vk::DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
+	else if (message_severity & vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
 	{
 		if (callback_data && callback_data.pMessage)
 		{
@@ -271,17 +271,17 @@ fn void vk_swapchain_present_test() @test
 	}
 
 	VkSwapchainTestValidation validation = {};
-	vk::DebugUtilsMessengerEXT messenger = 0;
-	if (vk::createDebugUtilsMessengerEXT)
+	vk::DebugUtilsMessengerEXT messenger = (vk::DebugUtilsMessengerEXT)0;
+	if (vk::extensions.vkCreateDebugUtilsMessengerEXT)
 	{
 		vk::DebugUtilsMessengerCreateInfoEXT info = {
-			.sType = vk::StructureType.vk::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-			.pfnUserCallback = &vk_swapchain_test_messenger_callback,
+			.sType = vk::StructureType.STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+			.pfnUserCallback = (vk::PFN_vkDebugUtilsMessengerCallbackEXT)&vk_swapchain_test_messenger_callback,
 			.pUserData = &validation,
-			.messageSeverity = vk::DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | vk::DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-			.messageType = vk::DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | vk::DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | vk::DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+			.messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+			.messageType = vk::DebugUtilsMessageTypeFlagBitsEXT.DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | vk::DebugUtilsMessageTypeFlagBitsEXT.DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | vk::DebugUtilsMessageTypeFlagBitsEXT.DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
 		};
-		if (catch err = vk_check(vk::createDebugUtilsMessengerEXT(renderer.vk.instance, &info, null, &messenger)))
+		if (catch err = vk_check(vk::extensions.vkCreateDebugUtilsMessengerEXT(renderer.vk.instance, &info, null, &messenger)))
 		{
 			log::warn("Vulkan swapchain test: could not install validation messenger");
 		}
@@ -291,12 +291,12 @@ fn void vk_swapchain_present_test() @test
 		log::warn("Vulkan swapchain test: debug messenger entry point unavailable");
 	}
 
-	bool have_messenger = messenger != 0;
+	bool have_messenger = messenger != (vk::DebugUtilsMessengerEXT)0;
 	bool exercised = vk_swapchain_test_run(window);
-	if (have_messenger && vk::destroyDebugUtilsMessengerEXT)
+	if (have_messenger && vk::extensions.vkDestroyDebugUtilsMessengerEXT)
 	{
-		vk::destroyDebugUtilsMessengerEXT(renderer.vk.instance, messenger, null);
-		messenger = 0;
+		vk::extensions.vkDestroyDebugUtilsMessengerEXT(renderer.vk.instance, messenger, null);
+		messenger = (vk::DebugUtilsMessengerEXT)0;
 	}
 	renderer_deinit();
 

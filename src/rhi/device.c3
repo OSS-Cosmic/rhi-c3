@@ -465,6 +465,9 @@ fn Device? device_init_vk(PhysicalAdapter* adapter, alloc::Allocator allocator =
 		if (q.queue == (vk::Queue)0) vk::getDeviceQueue(vk_device, q.family_index, q.slot_index, &q.queue);
 	}
 
+	// The device is created for Vulkan 1.3, so prefer the core entry points: the
+	// *KHR names resolve to loader trampolines that crash when the extension is
+	// not enabled.
 	vma::VulkanFunctions vulkan_functions = {
 		.get_physical_device_properties = vk::getPhysicalDeviceProperties,
 		.get_instance_proc_addr = vk::getInstanceProcAddr,
@@ -485,12 +488,12 @@ fn Device? device_init_vk(PhysicalAdapter* adapter, alloc::Allocator allocator =
 		.create_image = vk::vkCreateImage,
 		.destroy_image = vk::destroyImage,
 		.cmd_copy_buffer = vk::cmdCopyBuffer,
-		.get_buffer_memory_requirements2_khr = vk::extensions.vkGetBufferMemoryRequirements2KHR,
-		.get_image_memory_requirements2_khr = vk::extensions.vkGetImageMemoryRequirements2KHR,
-		.bind_buffer_memory2_khr = vk::extensions.vkBindBufferMemory2KHR,
-		.bind_image_memory2_khr = vk::extensions.vkBindImageMemory2KHR,
-		.get_physical_device_memory_properties2_khr = vk::extensions.vkGetPhysicalDeviceMemoryProperties2KHR,
-		.get_physical_device_properties2_khr = vk::extensions.vkGetPhysicalDeviceProperties2KHR,
+		.get_buffer_memory_requirements2_khr = (vk::PFN_vkGetBufferMemoryRequirements2KHR)vk::getBufferMemoryRequirements2 ?: vk::extensions.vkGetBufferMemoryRequirements2KHR,
+		.get_image_memory_requirements2_khr = (vk::PFN_vkGetImageMemoryRequirements2KHR)vk::getImageMemoryRequirements2 ?: vk::extensions.vkGetImageMemoryRequirements2KHR,
+		.bind_buffer_memory2_khr = (vk::PFN_vkBindBufferMemory2KHR)vk::vkBindBufferMemory2 ?: vk::extensions.vkBindBufferMemory2KHR,
+		.bind_image_memory2_khr = (vk::PFN_vkBindImageMemory2KHR)vk::vkBindImageMemory2 ?: vk::extensions.vkBindImageMemory2KHR,
+		.get_physical_device_memory_properties2_khr = (vk::PFN_vkGetPhysicalDeviceMemoryProperties2KHR)vk::getPhysicalDeviceMemoryProperties2 ?: vk::extensions.vkGetPhysicalDeviceMemoryProperties2KHR,
+		.get_physical_device_properties2_khr = (vk::PFN_vkGetPhysicalDeviceProperties2KHR)vk::getPhysicalDeviceProperties2 ?: vk::extensions.vkGetPhysicalDeviceProperties2KHR,
 		.get_device_buffer_memory_requirements = vk::getDeviceBufferMemoryRequirements,
 		.get_device_image_memory_requirements = vk::getDeviceImageMemoryRequirements,
 	};

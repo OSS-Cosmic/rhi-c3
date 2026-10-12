@@ -1,0 +1,16 @@
+package(default_visibility = ["//visibility:public"])
+
+load("//tools:examples.bzl", "rhi_example")
+load("//tools:slang.bzl", "shader_set")
+
+shader_set([
+    (":05_texture.slang", "vertexMain", "vertex", "05_texture.vert"),
+    (":05_texture.slang", "fragmentMain", "fragment", "05_texture.frag"),
+])
+
+rhi_example(
+    name = "05_texture",
+    backends = ["web"],
+    has_shaders = True,
+)
+exports_files(["05_texture.slang"])

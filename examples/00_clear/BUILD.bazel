@@ -1,0 +1,8 @@
+package(default_visibility = ["//visibility:public"])
+
+load("//tools:examples.bzl", "rhi_example")
+
+rhi_example(
+    name = "00_clear",
+    backends = ["vulkan", "dx12", "metal", "web"],
+)

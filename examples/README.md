@@ -38,7 +38,7 @@ also gated by the target, so the matrix for `c3-check` is:
 
 "Gated" means the backend is unavailable for that target. The WebGPU/WebGL2
 sources are feature-gated to wasm32, so native examples target Vulkan on Linux
-and Windows and Metal on macOS, while `meson compile -C build-meson web` builds the browser backends with
+and Windows and Metal on macOS, while `bazel build //examples/<ex>:web_bundle` builds the browser backends with
 the platform glue and bundle assets included here.
 
 ## Prerequisites
@@ -48,26 +48,26 @@ the platform glue and bundle assets included here.
   system development link or the runtime-library symlink created by the root
   build helper must be available.
 - VMA for Vulkan allocations. From the repository root,
-  initialize `vendor/VulkanMemoryAllocator` with Git submodules and run
-  `meson compile -C build-meson` to create `vendor/lib/libvma.a`.
+  initialize `vendor/VulkanMemoryAllocator` with Git submodules; Bazel builds `libvma.a`
+  (`bazel build //:vma`).
 - Dear ImGui for `03_imgui` and `04_svt`: initialize the `vendor/imgui_c/imgui`
-  submodule (`git submodule update --init vendor/imgui_c/imgui`), then run
-  `meson compile -C build-meson`. The examples are native-only and the runner
+  submodule (`git submodule update --init vendor/imgui_c/imgui`); Bazel builds
+  `libimgui.a` (`bazel build //:imgui`). The examples are native-only and the runner
   enables `RHI_IMGUI` only for these two targets.
-- `slangc` and SPIRV-Cross for shader preprocessing; set `SLANGC` / `SPIRV_CROSS`
+- `slangc` and SPIRV-Cross for shader preprocessing; set `SLANGC=` / `SPIRV_CROSS=`
   to use existing binaries in an offline checkout.
 
 ## Build, check, and test commands
 
-Run Meson from the repository root.
+Run Bazel from the repository root.
 
 ```sh
-meson compile -C build-meson                # vendor archives (vma, imgui if present)
-meson test -C build-meson                   # C3 @test functions on the host
-meson compile -C build-meson check          # C3 static library: all targets
-meson compile -C build-meson web            # browser bundles: 00, 01, 02, 05
-meson compile -C build-meson vulkan         # native Vulkan examples 00-04
-meson compile -C build-meson metal-03_imgui # macOS Metal ImGui demo
+bazel build //:vma //:imgui                 # vendor archives
+bazel test //:c3_host                       # C3 @test functions on the host
+bazel build //:check_linux_x64 //:check_headless   # C3 static library legs
+bazel build //examples/00_clear:web_bundle  # browser bundle (also 01, 02, 05)
+bazel build //examples/01_shader:vulkan     # native Vulkan example
+bazel build //examples/03_imgui:metal       # macOS Metal ImGui demo
 c3c build --target linux-x64                # one C3 target directly
 c3c test                                    # C3 tests directly
 ```

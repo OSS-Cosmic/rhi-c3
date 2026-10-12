@@ -427,11 +427,11 @@ fn SwapchainStatus? swapchain_frame_submit(Swapchain* s, Device* device, Queue* 
 
 fn void? swapchain_validate_desc(SwapchainDesc desc)
 {
-	assert(desc.width > 0 && desc.height > 0, "swapchain dimensions must be nonzero");
-	assert(desc.queue != null, "swapchain requires a present queue");
-	assert(desc.source.kind == WINDOW || desc.source.kind == SWAPCHAIN, "swapchain source must be a window or existing swapchain");
-	assert(desc.source.kind != WINDOW || desc.source.window.kind != NONE, "swapchain window source must contain a platform handle");
-	assert(desc.source.kind != SWAPCHAIN || desc.source.swapchain != null, "recreated swapchain source must be non-null");
+	if (!(desc.width > 0 && desc.height > 0)) return INITIALIZATION_FAILED~;
+	if (!(desc.queue != null)) return INITIALIZATION_FAILED~;
+	if (!(desc.source.kind == WINDOW || desc.source.kind == SWAPCHAIN)) return INITIALIZATION_FAILED~;
+	if (!(desc.source.kind != WINDOW || desc.source.window.kind != NONE)) return INITIALIZATION_FAILED~;
+	if (!(desc.source.kind != SWAPCHAIN || desc.source.swapchain != null)) return INITIALIZATION_FAILED~;
 }
 
 fn String swapchain_canvas_selector(WindowCanvas c)

@@ -336,7 +336,7 @@ fn void cmd_set_viewport(Cmd* c, Device* device, Viewport vp)
 						y += height;
 						height = -height;
 					}
-					d3d12::Viewport vp = {
+					d3d12::Viewport d3d_viewport = {
 						.top_left_x = viewport.x,
 						.top_left_y = y,
 						.width = viewport.width,
@@ -344,7 +344,7 @@ fn void cmd_set_viewport(Cmd* c, Device* device, Viewport vp)
 						.min_depth = viewport.min_depth,
 						.max_depth = viewport.max_depth,
 					};
-					list.vtbl.rs_set_viewports(list, 1, &vp);
+					list.vtbl.rs_set_viewports(list, 1, &d3d_viewport);
 				}
 			$endif
 		case MTL:
@@ -2154,24 +2154,24 @@ fn void cmd_copy_image(Cmd* c, Device* device, Image* src, Image* dst, ImageCopy
 					(void)device;
 					assert(src != null && dst != null, "image copy requires source and destination images");
 					assert(src.backend.dx12.resource && dst.backend.dx12.resource, "image copy resources must be initialized");
-					ImageDx12* s = &src.backend.dx12;
-					ImageDx12* d = &dst.backend.dx12;
+					ImageDx12* src_img = &src.backend.dx12;
+					ImageDx12* dst_img = &dst.backend.dx12;
 					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
 
 					d3d12::TextureCopyLocation src_loc = {};
-					src_loc.resource = s.resource;
+					src_loc.resource = src_img.resource;
 					src_loc.type = d3d12::TextureCopyType.SUBRESOURCE_INDEX;
-					src_loc.subresource_index = dx12_copy_subresource(s, d.src_mip_level, d.src_array_layer, BarrierAspect.COLOR);
+					src_loc.subresource_index = dx12_copy_subresource(src_img, d.src_mip_level, d.src_array_layer, BarrierAspect.COLOR);
 					d3d12::TextureCopyLocation dst_loc = {};
-					dst_loc.resource = d.resource;
+					dst_loc.resource = dst_img.resource;
 					dst_loc.type = d3d12::TextureCopyType.SUBRESOURCE_INDEX;
-					dst_loc.subresource_index = dx12_copy_subresource(d, d.dst_mip_level, d.dst_array_layer, BarrierAspect.COLOR);
+					dst_loc.subresource_index = dx12_copy_subresource(dst_img, d.dst_mip_level, d.dst_array_layer, BarrierAspect.COLOR);
 
 					// A copy of the whole source subresource passes no box (required for
 					// depth-stencil and multisampled resources).
-					uint mip_width = s.width >> d.src_mip_level;
-					uint mip_height = s.height >> d.src_mip_level;
-					uint mip_depth = s.depth >> d.src_mip_level;
+					uint mip_width = src_img.width >> d.src_mip_level;
+					uint mip_height = src_img.height >> d.src_mip_level;
+					uint mip_depth = src_img.depth >> d.src_mip_level;
 					if (mip_width == 0) mip_width = 1;
 					if (mip_height == 0) mip_height = 1;
 					if (mip_depth == 0) mip_depth = 1;
@@ -2364,6 +2364,7 @@ fn void mtl_copy_layout(Format format, uint width, uint height, uint bytes_per_r
 // is only legal once the GPU finished every list recorded from the pool.
 module rhi @feat(RHI_DX12 & !RHI_HEADLESS & !WASM & WIN32);
 import d3d12, dxgi;
+import std::math::geometry;
 
 const uint DX12_MAX_RENDER_TARGETS = 8;
 // Argument record sizes of the two ExecuteIndirect command signatures.
@@ -2394,7 +2395,7 @@ struct CmdDx12
 // positive extent anchored at the top-left, so the flipped form
 // {y = far edge, height < 0} becomes {y = y + height, height = -height}.
 
-fn d3d12::Rect dx12_rect(std::math::geometry::Rect rect) @local
+fn d3d12::Rect dx12_rect(std::math::geometry::Rect rect) @private
 {
 	return {
 		.left = (int)rect.x,
@@ -2409,7 +2410,7 @@ fn d3d12::Rect dx12_rect(std::math::geometry::Rect rect) @local
 
 // The signature for one draw argument layout, created on first use and owned
 // by the device. Null when creation fails.
-fn d3d12::CommandSignature* dx12_draw_signature(Device* device, bool indexed) @local
+fn d3d12::CommandSignature* dx12_draw_signature(Device* device, bool indexed) @private
 {
 	DeviceDx12* state = &device.backend.dx12;
 	d3d12::CommandSignature** slot = indexed ? &state.draw_indexed_signature : &state.draw_signature;
@@ -2448,7 +2449,7 @@ fn d3d12::CommandSignature* dx12_draw_signature(Device* device, bool indexed) @l
 
 // Append the barrier `before` -> `after` on `resource` (one subresource, or
 // ALL_SUBRESOURCES) to `out`; nothing when the states need no ordering.
-fn uint dx12_emit_barrier(d3d12::ResourceBarrier* out, d3d12::Resource* resource, uint subresource, d3d12::ResourceStates before, d3d12::ResourceStates after) @local
+fn uint dx12_emit_barrier(d3d12::ResourceBarrier* out, d3d12::Resource* resource, uint subresource, d3d12::ResourceStates before, d3d12::ResourceStates after) @private
 {
 	switch (dx12_barrier_kind(before, after))
 	{
@@ -2472,7 +2473,7 @@ fn uint dx12_emit_barrier(d3d12::ResourceBarrier* out, d3d12::Resource* resource
 }
 
 // True when the barrier covers every subresource of the image.
-fn bool dx12_image_barrier_whole(ImageDx12* image, ImageBarrier barrier) @local
+fn bool dx12_image_barrier_whole(ImageDx12* image, ImageBarrier barrier) @private
 {
 	if (barrier.base_mip != 0 || barrier.base_layer != 0) return false;
 	if (barrier.mip_count != 0 && barrier.mip_count < image.mip_levels) return false;
@@ -2488,7 +2489,7 @@ fn bool dx12_image_barrier_whole(ImageDx12* image, ImageBarrier barrier) @local
 
 // Format used by a PLACED_FOOTPRINT: depth planes are copied as their
 // shader-readable single-plane equivalents.
-fn dxgi::Format dx12_copy_format(Format format, BarrierAspect aspect) @local
+fn dxgi::Format dx12_copy_format(Format format, BarrierAspect aspect) @private
 {
 	if (!format_get_props(format).is_depth) return format_to_dxgi(format);
 	if (aspect == BarrierAspect.STENCIL)
@@ -2499,7 +2500,7 @@ fn dxgi::Format dx12_copy_format(Format format, BarrierAspect aspect) @local
 	return format_to_dxgi_srv(format);
 }
 
-fn uint dx12_copy_subresource(ImageDx12* image, uint mip, uint layer, BarrierAspect aspect) @local
+fn uint dx12_copy_subresource(ImageDx12* image, uint mip, uint layer, BarrierAspect aspect) @private
 {
 	uint plane = aspect == BarrierAspect.STENCIL ? 1 : 0;
 	return mip + (layer + plane * image.array_layers) * image.mip_levels;
@@ -2512,7 +2513,7 @@ fn void dx12_copy_buffer_image(
 	Cmd* cmd, Buffer* buffer, Image* img, bool to_texture,
 	ulong buffer_offset, uint bytes_per_row, uint bytes_per_image,
 	uint mip_level, uint base_layer, uint layer_count, BarrierAspect aspect,
-	int x, int y, int z, uint width, uint height, uint depth) @local
+	int x, int y, int z, uint width, uint height, uint depth) @private
 {
 	assert(buffer != null && img != null, "buffer-image copy requires a buffer and image");
 	assert(buffer.backend.dx12.resource && img.backend.dx12.resource, "buffer-image copy resources must be initialized");

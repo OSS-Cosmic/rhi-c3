@@ -37,7 +37,7 @@ fn vk::Bool32 sanity_messenger_callback(
 	void* user_data)
 {
 	SanityEnv* env = (SanityEnv*)user_data;
-	if (message_severity & vk::DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) atomic::fetch_add(&env.errors, 1u);
+	if (message_severity & vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) atomic::fetch_add(&env.errors, 1u);
 	return vk::FALSE;
 }
 
@@ -48,16 +48,16 @@ fn void sanity_env_init(SanityEnv* env, Backend backend)
 	{
 		case VK:
 			renderer_init({ .backend = VK, .vk = { .app_name = "rhi-sanity", .enable_validation_layer = true } })!!;
-			if (vk::createDebugUtilsMessengerEXT)
+			if (vk::extensions.vkCreateDebugUtilsMessengerEXT)
 			{
 				vk::DebugUtilsMessengerCreateInfoEXT info = {
-					.sType = vk::StructureType.vk::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-					.pfnUserCallback = &sanity_messenger_callback,
+					.sType = vk::StructureType.STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+					.pfnUserCallback = (vk::PFN_vkDebugUtilsMessengerCallbackEXT)&sanity_messenger_callback,
 					.pUserData = env,
-					.messageSeverity = vk::DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | vk::DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-					.messageType = vk::DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | vk::DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | vk::DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+					.messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+					.messageType = vk::DebugUtilsMessageTypeFlagBitsEXT.DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | vk::DebugUtilsMessageTypeFlagBitsEXT.DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | vk::DebugUtilsMessageTypeFlagBitsEXT.DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
 				};
-				vk_check(vk::createDebugUtilsMessengerEXT(renderer.vk.instance, &info, null, &env.messenger))!!;
+				vk_check(vk::extensions.vkCreateDebugUtilsMessengerEXT(renderer.vk.instance, &info, null, &env.messenger))!!;
 			}
 		default:
 			abort("sanity suite backend is not compiled");
@@ -76,10 +76,10 @@ fn void sanity_env_deinit(SanityEnv* env)
 		env.has_dev = false;
 	}
 	env.adapters.free();
-	if (env.messenger != 0 && vk::destroyDebugUtilsMessengerEXT)
+	if (env.messenger != (vk::DebugUtilsMessengerEXT)0 && vk::extensions.vkDestroyDebugUtilsMessengerEXT)
 	{
-		vk::destroyDebugUtilsMessengerEXT(renderer.vk.instance, env.messenger, null);
-		env.messenger = 0;
+		vk::extensions.vkDestroyDebugUtilsMessengerEXT(renderer.vk.instance, env.messenger, null);
+		env.messenger = (vk::DebugUtilsMessengerEXT)0;
 	}
 	renderer_deinit();
 }

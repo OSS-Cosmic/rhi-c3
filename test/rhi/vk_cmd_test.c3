@@ -31,30 +31,30 @@ macro @with_vk_cmd_device(;@body(Device* device))
 
 fn void vk_barrier_undefined_layout() @test
 {
-	test::eq(vk_resource_state_to_image_layout({}), vk::ImageLayout.UNDEFINED);
-	test::eq(vk_resource_state_to_image_layout_aspect({}, STENCIL), vk::ImageLayout.UNDEFINED);
+	test::eq(vk_resource_state_to_image_layout({}), vk::ImageLayout.IMAGE_LAYOUT_UNDEFINED);
+	test::eq(vk_resource_state_to_image_layout_aspect({}, STENCIL), vk::ImageLayout.IMAGE_LAYOUT_UNDEFINED);
 }
 
 fn void vk_barrier_storage_mixed_is_general() @test
 {
 	ResourceState state = { .storage_read = true, .shader_resource = true };
-	test::eq(vk_resource_state_to_image_layout(state), vk::ImageLayout.GENERAL);
+	test::eq(vk_resource_state_to_image_layout(state), vk::ImageLayout.IMAGE_LAYOUT_GENERAL);
 }
 
 fn void vk_barrier_stencil_aspect_layout() @test
 {
-	test::eq(vk_resource_state_to_image_layout_aspect({ .depth_write = true }, STENCIL), vk::ImageLayout.STENCIL_ATTACHMENT_OPTIMAL);
-	test::eq(vk_resource_state_to_image_layout_aspect({ .depth_read = true }, STENCIL), vk::ImageLayout.STENCIL_READ_ONLY_OPTIMAL);
-	test::eq(vk_resource_state_to_image_layout_aspect({ .depth_write = true }, DEPTH_STENCIL), vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-	test::eq(vk_resource_state_to_image_layout_aspect({ .depth_write = true }, DEPTH), vk::ImageLayout.DEPTH_ATTACHMENT_OPTIMAL);
+	test::eq(vk_resource_state_to_image_layout_aspect({ .depth_write = true }, STENCIL), vk::ImageLayout.IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL);
+	test::eq(vk_resource_state_to_image_layout_aspect({ .depth_read = true }, STENCIL), vk::ImageLayout.IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL);
+	test::eq(vk_resource_state_to_image_layout_aspect({ .depth_write = true }, DEPTH_STENCIL), vk::ImageLayout.IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+	test::eq(vk_resource_state_to_image_layout_aspect({ .depth_write = true }, DEPTH), vk::ImageLayout.IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 }
 
 fn void vk_barrier_hint_keeps_attachment_stage() @test
 {
 	VkStageMaskResult stages = vk_stage_bits_to_vk({ .fragment = true }, { .render_target = true }, {});
 	test::@check(stages.ok);
-	test::@check((stages.mask & vk::PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT) != 0);
-	test::@check((stages.mask & vk::PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT) != 0);
+	test::@check(((ulong)stages.mask & (ulong)vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT) != 0);
+	test::@check(((ulong)stages.mask & (ulong)vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT) != 0);
 }
 
 fn void vk_barrier_ray_tracing_hint_without_caps_invalid() @test
@@ -63,20 +63,20 @@ fn void vk_barrier_ray_tracing_hint_without_caps_invalid() @test
 	test::@check(!stages.ok);
 	stages = vk_stage_bits_to_vk({ .ray_tracing = true }, {}, { .ray_tracing_pipeline_enabled = true });
 	test::@check(stages.ok);
-	test::@check((stages.mask & vk::PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR) != 0);
+	test::@check(((ulong)stages.mask & (ulong)vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR) != 0);
 }
 
 fn void vk_barrier_accel_build_input_access() @test
 {
-	test::@check((vk_resource_state_to_access({ .accel_build_input = true }) & vk::ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR) != 0);
+	test::@check(((ulong)vk_resource_state_to_access({ .accel_build_input = true }) & (ulong)vk::AccessFlagBits2.ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR) != 0);
 }
 
 fn void vk_barrier_derived_stages_gate_ray_tracing() @test
 {
 	VkStageMaskResult stages = vk_stage_mask_from_state({ .shader_resource = true }, {});
 	test::@check(stages.ok);
-	test::@check((stages.mask & vk::PIPELINE_STAGE_2_COMPUTE_SHADER_BIT) != 0);
-	test::@check((stages.mask & vk::PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR) == 0);
+	test::@check(((ulong)stages.mask & (ulong)vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COMPUTE_SHADER_BIT) != 0);
+	test::@check(((ulong)stages.mask & (ulong)vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR) == 0);
 	stages = vk_stage_mask_from_state({ .accel_read = true }, {});
 	test::@check(!stages.ok);
 }
@@ -86,16 +86,16 @@ fn void queue_submit_vk_test() @test
 	@with_vk_cmd_device(; Device* device)
 	{
 		vk::CommandPool pool;
-		vk::CommandPoolCreateInfo pool_info = { .sType = vk::StructureType.COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = device.graphics_queue.backend.vk.family_index };
-		vk_check(device.backend.vk.vtable.createCommandPool(device.backend.vk.device, &pool_info, null, &pool))!!;
-		defer device.backend.vk.vtable.destroyCommandPool(device.backend.vk.device, pool, null);
+		vk::CommandPoolCreateInfo pool_info = { .sType = vk::StructureType.STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .queueFamilyIndex = device.graphics_queue.backend.vk.family_index };
+		vk_check(vk::vkCreateCommandPool(device.backend.vk.device, &pool_info, null, &pool))!!;
+		defer vk::destroyCommandPool(device.backend.vk.device, pool, null);
 		vk::CommandBuffer cmd_buffer;
-		vk::CommandBufferAllocateInfo alloc_info = { .sType = vk::StructureType.COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = pool, .level = vk::CommandBufferLevel.PRIMARY, .commandBufferCount = 1 };
-		vk_check(device.backend.vk.vtable.allocateCommandBuffers(device.backend.vk.device, &alloc_info, &cmd_buffer))!!;
-		defer device.backend.vk.vtable.freeCommandBuffers(device.backend.vk.device, pool, 1, &cmd_buffer);
-		vk::CommandBufferBeginInfo begin_info = { .sType = vk::StructureType.COMMAND_BUFFER_BEGIN_INFO };
-		vk_check(device.backend.vk.vtable.beginCommandBuffer(cmd_buffer, &begin_info))!!;
-		vk_check(device.backend.vk.vtable.endCommandBuffer(cmd_buffer))!!;
+		vk::CommandBufferAllocateInfo alloc_info = { .sType = vk::StructureType.STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = pool, .level = vk::CommandBufferLevel.COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1 };
+		vk_check(vk::vkAllocateCommandBuffers(device.backend.vk.device, &alloc_info, &cmd_buffer))!!;
+		defer vk::freeCommandBuffers(device.backend.vk.device, pool, 1, &cmd_buffer);
+		vk::CommandBufferBeginInfo begin_info = { .sType = vk::StructureType.STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+		vk_check(vk::vkBeginCommandBuffer(cmd_buffer, &begin_info))!!;
+		vk_check(vk::vkEndCommandBuffer(cmd_buffer))!!;
 		Cmd cmd = { .backend.vk = { .cmd = cmd_buffer } };
 		Cmd*[1] cmds = { &cmd };
 		queue_submit(&device.graphics_queue, device, { .cmds = cmds[..] })!!;

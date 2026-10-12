@@ -1,0 +1,7 @@
+common --enable_bzlmod
+build --cxxopt=-std=c++17 --host_cxxopt=-std=c++17
+build --incompatible_strict_action_env
+build --action_env=PATH
+build --action_env=HOME
+build --action_env=C3C
+test --test_output=errors
