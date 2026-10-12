@@ -13,26 +13,6 @@ const int FRAMES_IN_FLIGHT = 3;
 const uint TEX_SIZE = 8;
 const rhi::Format TEX_FORMAT = rhi::Format.RGBA8_UNORM;
 
-// The example runner/shader tooling compiles the manifest into these files before checking or building
-// the example.  Vulkan consumes SPIR-V and Metal consumes generated MSL; do
-// not embed the checked-in shader source files here.
-$if rhi::HAS_VK:
-const char[*] TEXTURE_VERTEX_SPV @align(4) = $embed("../../build/examples/05_texture/shaders/05_texture.vert.spv");
-const char[*] TEXTURE_FRAGMENT_SPV @align(4) = $embed("../../build/examples/05_texture/shaders/05_texture.frag.spv");
-$endif
-$if rhi::HAS_MTL:
-const char[*] TEXTURE_VERTEX_MSL = $embed("../../build/examples/05_texture/shaders/05_texture.vert.metal");
-const char[*] TEXTURE_FRAGMENT_MSL = $embed("../../build/examples/05_texture/shaders/05_texture.frag.metal");
-$endif
-$if rhi::HAS_WGPU:
-const char[*] TEXTURE_VERTEX_WGSL = $embed("../../build/examples/05_texture/shaders/05_texture.vert.wgsl");
-const char[*] TEXTURE_FRAGMENT_WGSL = $embed("../../build/examples/05_texture/shaders/05_texture.frag.wgsl");
-$endif
-$if rhi::HAS_WEBGL:
-const char[*] TEXTURE_VERTEX_GLSL = $embed("../../build/examples/05_texture/shaders/05_texture.vert.glsl");
-const char[*] TEXTURE_FRAGMENT_GLSL = $embed("../../build/examples/05_texture/shaders/05_texture.frag.glsl");
-$endif
-
 struct TextureVertex
 {
 	float[2] position;
@@ -281,53 +261,6 @@ fn void texture_fill_checkerboard(char[256]* pixels)
 	}
 }
 
-fn rhi::ShaderGraphicsOptions texture_shader_stages()
-{
-	char[] vertex_data;
-	char[] fragment_data;
-	String vertex_entry;
-	String fragment_entry;
-	switch (rhi::renderer.backend)
-	{
-		$if rhi::HAS_MTL:
-		case rhi::Backend.MTL:
-			vertex_data = TEXTURE_VERTEX_MSL[..];
-			fragment_data = TEXTURE_FRAGMENT_MSL[..];
-			vertex_entry = "vertexMain";
-			fragment_entry = "fragmentMain";
-		$endif
-		$if rhi::HAS_VK:
-		case rhi::Backend.VK:
-			vertex_data = TEXTURE_VERTEX_SPV[..];
-			fragment_data = TEXTURE_FRAGMENT_SPV[..];
-			vertex_entry = "main";
-			fragment_entry = "main";
-		$endif
-		$if rhi::HAS_WGPU:
-		case rhi::Backend.WGPU:
-			vertex_data = TEXTURE_VERTEX_WGSL[..];
-			fragment_data = TEXTURE_FRAGMENT_WGSL[..];
-			vertex_entry = "vertexMain";
-			fragment_entry = "fragmentMain";
-		$endif
-		$if rhi::HAS_WEBGL:
-		case rhi::Backend.WEBGL:
-			vertex_data = TEXTURE_VERTEX_GLSL[..];
-			fragment_data = TEXTURE_FRAGMENT_GLSL[..];
-			vertex_entry = "main";
-			fragment_entry = "main";
-		$endif
-		default:
-			return {};
-	}
-	return {
-		.vertex_stage = { .data = vertex_data, .entry_point = vertex_entry },
-		.has_vertex_stage = true,
-		.fragment_stage = { .data = fragment_data, .entry_point = fragment_entry },
-		.has_fragment_stage = true,
-	};
-}
-
 fn void? texture_pipeline_init(rhi::Format format)
 {
 	rhi::Pipeline? pipeline = rhi::pipeline_init_graphics(&state.device, {
@@ -520,4 +453,57 @@ fn void main(String[] args)
 fn void texture_web_start(String[] args) @feat(WASM) @export("_start")
 {
 	platform::run(texture_app(), args);
+}
+
+module texture_example @feat(RHI_VK & !RHI_HEADLESS & !WASM & (LINUX | WIN32));
+import rhi;
+const char[*] TEXTURE_VERTEX_SPV @align(4) = $embed("../../build/examples/05_texture/shaders/05_texture.vert.spv");
+const char[*] TEXTURE_FRAGMENT_SPV @align(4) = $embed("../../build/examples/05_texture/shaders/05_texture.frag.spv");
+fn ShaderGraphicsOptions texture_shader_stages()
+{
+	return {
+		.vertex_stage = { .data = TEXTURE_VERTEX_SPV[..], .entry_point = "main" },
+		.has_vertex_stage = true,
+		.fragment_stage = { .data = TEXTURE_FRAGMENT_SPV[..], .entry_point = "main" },
+		.has_fragment_stage = true,
+	};
+}
+
+module texture_example @feat(RHI_MTL & DARWIN & !RHI_HEADLESS);
+import rhi;
+const char[*] TEXTURE_VERTEX_MSL = $embed("../../build/examples/05_texture/shaders/05_texture.vert.metal");
+const char[*] TEXTURE_FRAGMENT_MSL = $embed("../../build/examples/05_texture/shaders/05_texture.frag.metal");
+fn ShaderGraphicsOptions texture_shader_stages()
+{
+	return {
+		.vertex_stage = { .data = TEXTURE_VERTEX_MSL[..], .entry_point = "vertexMain" },
+		.has_vertex_stage = true,
+		.fragment_stage = { .data = TEXTURE_FRAGMENT_MSL[..], .entry_point = "fragmentMain" },
+		.has_fragment_stage = true,
+	};
+}
+
+module texture_example @feat(RHI_WGPU & RHI_WEBGL & !RHI_HEADLESS & WASM);
+import rhi;
+const char[*] TEXTURE_VERTEX_WGSL = $embed("../../build/examples/05_texture/shaders/05_texture.vert.wgsl");
+const char[*] TEXTURE_FRAGMENT_WGSL = $embed("../../build/examples/05_texture/shaders/05_texture.frag.wgsl");
+const char[*] TEXTURE_VERTEX_GLSL = $embed("../../build/examples/05_texture/shaders/05_texture.vert.glsl");
+const char[*] TEXTURE_FRAGMENT_GLSL = $embed("../../build/examples/05_texture/shaders/05_texture.frag.glsl");
+fn ShaderGraphicsOptions texture_shader_stages()
+{
+	if (rhi::renderer.backend == rhi::Backend.WGPU)
+	{
+		return {
+			.vertex_stage = { .data = TEXTURE_VERTEX_WGSL[..], .entry_point = "vertexMain" },
+			.has_vertex_stage = true,
+			.fragment_stage = { .data = TEXTURE_FRAGMENT_WGSL[..], .entry_point = "fragmentMain" },
+			.has_fragment_stage = true,
+		};
+	}
+	return {
+		.vertex_stage = { .data = TEXTURE_VERTEX_GLSL[..], .entry_point = "main" },
+		.has_vertex_stage = true,
+		.fragment_stage = { .data = TEXTURE_FRAGMENT_GLSL[..], .entry_point = "main" },
+		.has_fragment_stage = true,
+	};
 }

@@ -7,6 +7,7 @@ the browser bundle (glue, index.html) next to it; other targets are compile-only
 usage: c3_example.py <c3c> <example> <target> <outdir> <stamp> [sdl3 link flag ...]
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 IMGUI_EXAMPLES = {"03_imgui", "04_svt"}
+VULKAN_C3 = os.environ.get("VULKAN_C3_DIR") or str(ROOT / "subprojects" / "vulkan_c3")
 WEB_DIR = ROOT / "examples" / "platform" / "web"
 
 
@@ -36,12 +38,14 @@ def main(argv):
         )
         return 1
     outdir.mkdir(parents=True, exist_ok=True)
-    cmd = [c3c, "compile", f"examples/{example}/main.c3", "examples/platform/platform.c3", "src/**", "vendor/vulkan.c3l/vk/**",
+    cmd = [c3c, "compile", f"examples/{example}/main.c3", "examples/platform/platform.c3", "src/**", f"{VULKAN_C3}/vk/**",
            "--target", target, "-o", str(outdir / example)]
     if imgui:
         cmd += ["-D", "RHI_IMGUI"]
     if target == "linux-x64":
-        cmd += ["-D", "RHI_VK"]
+        cmd += ["-D", "RHI_VK"] + sdl3_flags
+    elif target == "wasm32":
+        cmd += ["-D", "RHI_WGPU", "-D", "RHI_WEBGL"]
     elif target == "macos-aarch64":
         cmd += ["-D", "RHI_MTL", "--libdir", ".", "--lib", "sdl3"]
         if imgui:

@@ -95,12 +95,43 @@ if c3c_name == ''
 endif
 c3c = find_program(c3c_name, required: false)
 
-sdl3_flags = run_command(
-  python, files('tools/sdl3_link_flags.py'), meson.project_build_root() / 'lib',
-  check: true,
-).stdout().strip().split('\n')
-if sdl3_flags == ['']
-  sdl3_flags = []
+# --- Vulkan.c3 -----------------------------------------------------------
+# Fetched from subprojects/vulkan_c3.wrap; bump `revision` there to update.
+vulkan_c3 = subproject('vulkan_c3')
+vulkan_c3_dir = meson.project_source_root() / 'subprojects' / 'vulkan_c3'
+
+# --- sdl3 ---------------------------------------------------------------
+# Linux builds SDL3 from the pinned wrap (subprojects/sdl3.wrap) so no system
+# dev package is needed; -Dsdl3_wrap=disabled falls back to the system library.
+sdl3_flags = []
+sdl3_deps = []
+if host_machine.system() == 'linux' and get_option('sdl3_wrap').allowed()
+  cmake = import('cmake')
+  sdl3_opts = cmake.subproject_options()
+  sdl3_opts.add_cmake_defines({
+    'CMAKE_BUILD_TYPE': 'Release',
+    'SDL_SHARED': true, 'SDL_STATIC': false,
+    'SDL_TESTS': false, 'SDL_EXAMPLES': false, 'SDL_TEST_LIBRARY': false,
+    'SDL_INSTALL': false,
+  })
+  sdl3_sub = cmake.subproject('sdl3', options: sdl3_opts)
+  sdl3_lib = sdl3_sub.target('SDL3-shared')
+  sdl3_link_dir = meson.project_build_root() / 'lib'
+  sdl3_deps += custom_target(
+    'sdl3-link',
+    input: sdl3_lib, output: 'sdl3-link.stamp',
+    command: [python, files('tools/link_sdl3.py'), '@INPUT0@', sdl3_link_dir, '@OUTPUT@'],
+    build_by_default: false,
+  )
+  sdl3_flags = ['-z', '-L' + sdl3_link_dir, '-z', '-Wl,-rpath,' + meson.project_build_root() / 'subprojects' / 'sdl3']
+else
+  sdl3_flags = run_command(
+    python, files('tools/sdl3_link_flags.py'), meson.project_build_root() / 'lib',
+    check: true,
+  ).stdout().strip().split('\n')
+  if sdl3_flags == ['']
+    sdl3_flags = []
+  endif
 endif
 
 if c3c.found()
@@ -110,7 +141,7 @@ if c3c.found()
     'c3-host', c3c,
     args: ['test'] + sdl3_flags,
     workdir: root,
-    depends: host_test_deps,
+    depends: host_test_deps + sdl3_deps,
     is_parallel: false,
     timeout: 600,
   )
@@ -177,6 +208,7 @@ if c3c.found()
   all_examples = []
   all_shader_targets = []
   macos_examples = []
+  linux_examples = []
   foreach backend, cfg : backends
     outputs = []
     shader_targets = []
@@ -201,6 +233,10 @@ if c3c.found()
           endif
         endforeach
       endif
+      if backend == 'web' and ex in has_shaders and not spirv_cross.found()
+        message('example-web-' + ex + ' skipped: embeds GLSL, spirv-cross not found')
+        continue
+      endif
       outdir = backend == 'web' ? 'web' / ex : 'examples' / backend / ex
       ex_output = custom_target(
         'example-' + backend + '-' + ex,
@@ -208,8 +244,9 @@ if c3c.found()
         command: [python, c3_example, c3c, ex, cfg[0],
                   meson.project_build_root() / outdir,
                   '@OUTPUT@'] + (backend == 'vulkan' ? sdl3_flags : []),
-        depends: cfg[2] + ex_shaders,
+        depends: cfg[2] + ex_shaders + (backend == 'vulkan' ? sdl3_deps : []),
         depend_files: c3_sources + files('examples' / ex / 'main.c3', 'examples/platform/platform.c3'),
+        env: {'VULKAN_C3_DIR': vulkan_c3_dir},
         build_by_default: false,
       )
       # one target per example: <backend>-<example>, e.g. vulkan-01_shader
@@ -220,6 +257,10 @@ if c3c.found()
     alias_target(backend, outputs, shader_targets)
     all_examples += [outputs, shader_targets]
     all_shader_targets += shader_targets
+    if backend == 'vulkan' or backend == 'web'
+      linux_examples += outputs
+      linux_examples += shader_targets
+    endif
     if backend == 'metal'
       macos_examples += outputs
       macos_examples += shader_targets
@@ -229,6 +270,8 @@ if c3c.found()
   # retain the all-backend aggregate, including Vulkan's VMA dependency.
   if host_machine.system() == 'darwin'
     alias_target('examples', macos_examples)
+  elif host_machine.system() == 'linux'
+    alias_target('examples', linux_examples)
   else
     alias_target('examples', all_examples + all_shader_targets)
   endif

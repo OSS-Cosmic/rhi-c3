@@ -17,3 +17,7 @@ Setup once: `meson setup build-meson`. Then `meson compile -C build-meson <targe
 | `examples` | every example, every backend |
 | `check` | C3 library, every target |
 | `check-<leg>` | one leg: `linux-x64`, `windows-x64`, `macos-aarch64`, `wasm32`, `headless`, `tests-macos` |
+
+## SDL3
+
+On Linux, Meson builds SDL3 from the pinned `subprojects/sdl3.wrap` (needs `cmake`). Bump the `revision` there to change versions; `-Dsdl3_wrap=disabled` uses the system library instead.

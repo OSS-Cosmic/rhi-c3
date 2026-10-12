@@ -23,3 +23,7 @@ __pycache__/
 *.swp
 .vscode/
 .idea/
+/subprojects/*
+!/subprojects/*.wrap
+!/subprojects/packagefiles/
+!/subprojects/packagefiles/**

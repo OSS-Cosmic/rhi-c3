@@ -1,0 +1,4 @@
+[wrap-git]
+url = https://github.com/OSS-Cosmic/Vulkan.c3.git
+revision = 27dd9a6b7e0ae81ca9f4d86c0a57753f0bd01909
+patch_directory = vulkan_c3

@@ -234,7 +234,7 @@ fn uint webgl_topology(PrimitiveTopology topology)
 
 fn uint webgl_components(VertexFormat format)
 {
-	switch (format) { case FLOAT: return 1; case FLOAT2: return 2; case FLOAT3: return 3; case FLOAT4: return 4; }
+	switch (format) { case FLOAT: return 1; case FLOAT2: return 2; case FLOAT3: return 3; case FLOAT4: return 4; case UBYTE4_NORM: return 4; }
 }
 
 fn uint webgl_wrap(SamplerAddress address)

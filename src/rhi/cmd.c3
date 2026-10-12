@@ -416,7 +416,7 @@ fn void cmd_set_scissor(Cmd* c, Device* device, std::math::geometry::Rect rect)
 				{
 					assert(c.backend.wgpu.pass != 0, "scissor requires an active render pass");
 					assert(rect.x >= 0 && rect.y >= 0, "scissor coordinates must be nonnegative");
-					wgpu_render_pass_set_scissor_rect(c.backend.wgpu.pass, (uint)rect.x, (uint)rect.y, rect.width, rect.height);
+					wgpu_render_pass_set_scissor_rect(c.backend.wgpu.pass, (uint)rect.x, (uint)rect.y, (uint)rect.width, (uint)rect.height);
 				}
 			$endif
 		case WEBGL:
