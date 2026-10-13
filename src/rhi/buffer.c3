@@ -554,7 +554,9 @@ fn vk::BufferUsageFlags buffer_usage_flags_vk(Device* device, BufferDesc desc) @
 		if (desc.usage.shader_resource) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
 		if (desc.usage.shader_resource_storage) usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
 	}
-	if (desc.stride > 0)
+	// A shader-writable buffer is a plain storage buffer whatever its stride;
+	// the texel-buffer bits above only cover typed access.
+	if (desc.stride > 0 || desc.usage.shader_resource_storage)
 	{
 		usage |= vk::BufferUsageFlagBits.BUFFER_USAGE_STORAGE_BUFFER_BIT;
 	}

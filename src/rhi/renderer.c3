@@ -461,15 +461,15 @@ fn vk::Bool32 vk_debug_messenger_callback(
 	if (message_severity & vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
 	{
 		atomic::fetch_add(&vk_validation_error_count, 1u);
-		log::error("VK ERROR: %s", callback_data.pMessage);
+		log::error("VK ERROR: %s", ((ZString)callback_data.pMessage).str_view());
 	}
 	if (message_severity & vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
 	{
-		log::warn("VK WARNING: %s", callback_data.pMessage);
+		log::warn("VK WARNING: %s", ((ZString)callback_data.pMessage).str_view());
 	}
 	if (message_severity & vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
 	{
-		log::info("VK INFO: %s", callback_data.pMessage, category: log::CATEGORY_RENDER);
+		log::info("VK INFO: %s", ((ZString)callback_data.pMessage).str_view(), category: log::CATEGORY_RENDER);
 	}
 	return vk::FALSE;
 }

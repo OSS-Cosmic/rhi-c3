@@ -72,11 +72,12 @@ fn Cmd? cmd_init(Device* device, Pool* pool)
 				vk::CommandBuffer command_buffer;
 				vk_check(vk::vkAllocateCommandBuffers(device.backend.vk.device, &info, &command_buffer))!;
 				Cmd c = { .backend.vk = { .cmd = command_buffer } };
-				// The Vulkan device does not track ray-tracing pipeline or
-				// acceleration-structure features yet, so both stay off and
-				// ray-tracing stages drop out of derived barrier masks, as HPL2
-				// does on a device without RT.
-				c.barrier_capabilities = {};
+				// device_init enables these features whenever the adapter has them,
+				// so the adapter flags say which barrier states are legal.
+				c.barrier_capabilities = {
+					.ray_tracing_pipeline_enabled = device.adapter.backend.vk.is_ray_tracing_pipeline_supported,
+					.acceleration_structure_enabled = device.adapter.backend.vk.is_acceleration_structure_supported,
+				};
 				return c;
 			$endif
 		case DX12:
@@ -471,6 +472,27 @@ fn void cmd_draw(Cmd* c, Device* device, uint vertex_count, uint instance_count 
 					 WebglCommand* x = webgl_push(c, DRAW); if (x != null) { x.count = vertex_count; x.instance_count = instance_count; x.first = first_vertex; }
 				}
 			$endif
+	}
+}
+
+// Dispatches the bound compute pipeline over `x * y * z` workgroups. Bind it
+// with `program_bind_compute_pipeline` first. Vulkan only.
+fn void cmd_dispatch(Cmd* c, Device* device, uint x, uint y = 1, uint z = 1)
+{
+	switch (renderer.backend)
+	{
+		case VK:
+			$if HAS_VK:
+				{
+					(void)device;
+					vk::cmdDispatch(c.backend.vk.cmd, x, y, z);
+				}
+			$endif
+		case DX12:
+		case MTL:
+		case WGPU:
+		case WEBGL:
+			unreachable("cmd_dispatch: compute is only implemented for Vulkan");
 	}
 }
 

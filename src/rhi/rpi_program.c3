@@ -11,8 +11,8 @@
 //   * descriptor sets resolved by binding *name* through the frame-aware
 //     `RpiDescriptorSetAlloc`.
 //
-// Only the Vulkan arm exists; compute pipelines, ray tracing and bindless /
-// external sets are not ported yet. Other backend arms are unreachable.
+// Only the Vulkan arm exists; ray tracing and bindless / external sets are
+// not ported yet. Compute pipelines go through `program_bind_compute_pipeline`. Other backend arms are unreachable.
 //
 // The `ProgramVk` / `ProgramPipelineSlotVk` / `ProgramDescriptorSetVk`
 // stand-ins for a build without Vulkan live in backend_stubs.c3.
@@ -133,6 +133,7 @@ struct RpiPoolSizes
 	uint storage_image;
 	uint uniform_buffer;
 	uint storage_buffer;
+	uint acceleration_structure;
 }
 
 // Owned copy of one stage's binary. The entry point is NUL-terminated so it
@@ -258,8 +259,7 @@ fn void program_build_reflection(Program* p, ProgramLayout layout) @private
 			case STORAGE_BUFFER:
 				slot.sizes.storage_buffer += n;
 			case ACCELERATION_STRUCTURE:
-				// Ray tracing is not ported; no pool type is reserved for it.
-				break;
+				slot.sizes.acceleration_structure += n;
 		}
 	}
 }
@@ -315,6 +315,26 @@ fn void? program_bind_pipeline(Program* p, Device* device, Cmd* cmd, ulong pipel
 		case VK:
 			$if HAS_VK:
 				return program_bind_pipeline_vk(p, device, cmd, pipeline_hash, desc);
+			$endif
+		case DX12:
+		case MTL:
+		case WGPU:
+		case WEBGL:
+			break;
+	}
+	unreachable();
+}
+
+// Builds (and caches under `pipeline_hash`) the compute pipeline from the
+// program's COMPUTE stage, then binds it on `cmd`. Shares the pipeline cache
+// with `program_bind_pipeline`, so use distinct hashes for the two kinds.
+fn void? program_bind_compute_pipeline(Program* p, Device* device, Cmd* cmd, ulong pipeline_hash)
+{
+	switch (renderer.backend)
+	{
+		case VK:
+			$if HAS_VK:
+				return program_bind_compute_pipeline_vk(p, device, cmd, pipeline_hash);
 			$endif
 		case DX12:
 		case MTL:
@@ -751,6 +771,49 @@ fn void? program_bind_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pi
 	return;
 }
 
+fn void? program_bind_compute_pipeline_vk(Program* p, Device* device, Cmd* cmd, ulong pipeline_hash)
+{
+	vk::Device dev = device.backend.vk.device;
+
+	if (try slot = p.pipelines.get_ref(pipeline_hash))
+	{
+		vk::cmdBindPipeline(cmd.backend.vk.cmd, vk::PipelineBindPoint.PIPELINE_BIND_POINT_COMPUTE, slot.backend.vk.pipeline);
+		return;
+	}
+
+	ProgramShaderBinary* compute = &p.shader_bins[ProgramStage.COMPUTE.ordinal];
+	assert(compute.data.len > 0, "program_bind_compute_pipeline: program has no compute stage");
+	assert(compute.data.len % 4 == 0, "SPIR-V size must be a multiple of 4");
+	vk::ShaderModuleCreateInfo module_info = {
+		.sType = vk::StructureType.STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+		.codeSize = compute.data.len,
+		.pCode = (uint*)compute.data.ptr,
+	};
+	vk::ShaderModule shader_module;
+	vk_check(vk::vkCreateShaderModule(dev, &module_info, null, &shader_module))!;
+
+	vk::ComputePipelineCreateInfo create_info = {
+		.sType = vk::StructureType.STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+		.stage = {
+			.sType = vk::StructureType.STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+			.stage = (vk::ShaderStageFlagBits)vk::ShaderStageFlagBits.SHADER_STAGE_COMPUTE_BIT,
+			.mod = shader_module,
+			.pName = compute.entry_point,
+		},
+		.layout = p.backend.vk.pipeline_layout,
+		.basePipelineIndex = -1,
+	};
+	vk::Pipeline pipeline;
+	vk::Result result = vk::vkCreateComputePipelines(dev, (vk::PipelineCache)0, 1, &create_info, null, &pipeline);
+	vk::destroyShaderModule(dev, shader_module, null);
+	vk_check(result)!;
+
+	ProgramPipelineSlot slot = { .backend.vk.pipeline = pipeline };
+	p.pipelines[pipeline_hash] = slot;
+	vk::cmdBindPipeline(cmd.backend.vk.cmd, vk::PipelineBindPoint.PIPELINE_BIND_POINT_COMPUTE, pipeline);
+	return;
+}
+
 fn void program_push_constants_vk(Program* p, Device* device, Cmd* cmd, char[] data, uint offset)
 {
 	assert(p.has_push_constant, "program_push_constants: layout declares no push constants");
@@ -808,6 +871,8 @@ fn void? program_bind_descriptors_vk(Program* p, Device* device, Cmd* cmd, uint 
 			vk::WriteDescriptorSet[32] writes;
 			vk::DescriptorImageInfo[32] image_infos;
 			vk::DescriptorBufferInfo[32] buffer_infos;
+			vk::AccelerationStructureKHR[32] accel_handles;
+			vk::WriteDescriptorSetAccelerationStructureKHR[32] accel_infos;
 			uint n = 0;
 			foreach (binding : bindings)
 			{
@@ -843,7 +908,13 @@ fn void? program_bind_descriptors_vk(Program* p, Device* device, Cmd* cmd, uint 
 						image_infos[n] = { .sampler = (vk::Sampler)d.handle };
 						writes[n].pImageInfo = &image_infos[n];
 					case ACCELERATION_STRUCTURE:
-						continue;
+						accel_handles[n] = (vk::AccelerationStructureKHR)d.handle;
+						accel_infos[n] = {
+							.sType = vk::StructureType.STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR,
+							.accelerationStructureCount = 1,
+							.pAccelerationStructures = &accel_handles[n],
+						};
+						writes[n].pNext = &accel_infos[n];
 				}
 				n++;
 			}
@@ -1009,7 +1080,7 @@ fn RpiDescriptorSetSlot*? rpi_descriptor_set_alloc_resolve(RpiDescriptorSetAlloc
 fn void? rpi_descriptor_set_alloc_create_pool(RpiDescriptorSetAlloc* a, Device* device) @private
 {
 	vk::Device dev = device.backend.vk.device;
-	vk::DescriptorPoolSize[5] pool_sizes;
+	vk::DescriptorPoolSize[6] pool_sizes;
 	uint pool_size_count = 0;
 
 	if (a.sizes.sampler > 0)
@@ -1035,6 +1106,11 @@ fn void? rpi_descriptor_set_alloc_create_pool(RpiDescriptorSetAlloc* a, Device* 
 	if (a.sizes.storage_buffer > 0)
 	{
 		pool_sizes[pool_size_count] = { .type = vk::DescriptorType.DESCRIPTOR_TYPE_STORAGE_BUFFER, .descriptorCount = a.sizes.storage_buffer * RPI_DESCRIPTOR_SETS_PER_POOL };
+		pool_size_count += 1;
+	}
+	if (a.sizes.acceleration_structure > 0)
+	{
+		pool_sizes[pool_size_count] = { .type = vk::DescriptorType.DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, .descriptorCount = a.sizes.acceleration_structure * RPI_DESCRIPTOR_SETS_PER_POOL };
 		pool_size_count += 1;
 	}
 

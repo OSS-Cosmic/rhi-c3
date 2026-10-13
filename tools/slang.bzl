@@ -40,19 +40,21 @@ slang_shader = rule(
     attrs = {
         "src": attr.label(allow_single_file = [".slang"], mandatory = True),
         "entry": attr.string(mandatory = True),
-        "stage": attr.string(mandatory = True, values = ["vertex", "fragment"]),
+        "stage": attr.string(mandatory = True, values = ["vertex", "fragment", "compute"]),
         "fmt": attr.string(mandatory = True, values = _EXT.keys()),
         "out_name": attr.string(mandatory = True),
         "deps": attr.label_list(allow_files = True),
     },
 )
 
-def shader_set(shaders):
+def shader_set(shaders, deps = []):
     """Declares shaders_{spirv,metal,wgsl,glsl} filegroups for one example.
 
     Args:
       shaders: list of (src label, entry, stage, output name) tuples, the same
         fields the old shaders.txt manifest carried.
+      deps: extra files the shaders `#include` (staged next to the sources so
+        relative includes resolve inside the sandbox).
     """
     for fmt in _EXT.keys():
         names = []
@@ -65,6 +67,7 @@ def shader_set(shaders):
                 stage = stage,
                 fmt = fmt,
                 out_name = out_name,
+                deps = deps,
                 tags = ["manual"],
             )
             names.append(":" + n)

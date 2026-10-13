@@ -428,3 +428,58 @@ fn void rpi_program_bind_descriptors_vk() @test
 	program_test_env_deinit(&env);
 	program_test_expect_no_validation_errors(&env);
 }
+
+const char[*] RPI_TEST_FILL_COMP_SPV @align(4) = $embed("testdata/fill.comp.spv");
+
+struct FillPush
+{
+	uint bias;
+	uint count;
+}
+
+fn void rpi_program_compute_dispatch_vk() @test
+{
+	ProgramTestEnv env;
+	if (!program_test_env_init(&env)) return;
+	Device* device = &env.dev;
+
+	ProgramModuleStage[1] modules = {
+		{ .stage = COMPUTE, .data = RPI_TEST_FILL_COMP_SPV[..], .entry_point = "main" },
+	};
+	ProgramLayoutBinding[1] bindings = {
+		{ .name = "outBuf", .set = 0, .binding = 0, .descriptor_type = STORAGE_BUFFER, .count = 1, .stages = { .compute = true } },
+	};
+	Program program = program_init(device, modules[..], {
+		.bindings = bindings[..],
+		.push_constant = { .stages = { .compute = true }, .size = FillPush::size },
+		.has_push_constant = true,
+	})!!;
+	defer program_deinit(&program, device);
+
+	const uint COUNT = 200;
+	ulong bytes = COUNT * uint::size;
+	Buffer out = buffer_init_general(device, { .size = bytes, .usage = { .shader_resource_storage = true, .transfer_dst = true }, .buffer_usage = READBACK })!!;
+	defer buffer_deinit(&out, device);
+
+	Pool pool = pool_init(device, &device.graphics_queue)!!;
+	defer pool_deinit(&pool, device);
+	Cmd cmd = cmd_init(device, &pool)!!;
+	defer cmd_deinit(&cmd, device, &pool);
+
+	cmd_begin(&cmd, device)!!;
+	program_bind_compute_pipeline(&program, device, &cmd, 1)!!;
+	program_bind_compute_pipeline(&program, device, &cmd, 1)!!;
+	test::eq(program.pipelines.len(), 1);
+	DescriptorBinding[1] binds = { descriptor_binding("outBuf", descriptor_storage_buffer(&out, 0, bytes), 0) };
+	program_bind_descriptors(&program, device, &cmd, 0, binds[..], COMPUTE)!!;
+	FillPush push = { .bias = 7, .count = COUNT };
+	program_push_constants(&program, device, &cmd, ((char*)&push)[:FillPush::size], 0);
+	cmd_dispatch(&cmd, device, (COUNT + 63) / 64);
+	cmd_buffer_barrier(&cmd, device, { .buffer = &out, .before = { .storage_write = true }, .after = { .host_read = true }, .size = bytes });
+	program_test_submit(&cmd, device);
+
+	uint* data = (uint*)out.mapped_region.ptr;
+	for (uint i = 0; i < COUNT; i++) test::eq(data[i], i * 3 + 7);
+	program_test_expect_no_validation_errors(&env);
+	program_test_env_deinit(&env);
+}
