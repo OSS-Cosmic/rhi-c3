@@ -114,7 +114,7 @@ fn void image_view_create_destroy_vk() @test
 		})!!;
 		defer image_view_deinit(&view, device);
 		test::@check(!image_view_is_empty(&view));
-		test::@check(view.backend.vk.view != vk::NULL_HANDLE);
+		test::@check(view.backend.vk.view != null);
 	};
 }
 
@@ -156,7 +156,7 @@ fn void image_upload_vk_test() @test
 			.extent = { .width = 8, .height = 8, .depth = 1 },
 			.layer_count = 1,
 		})!!;
-		test::@check(image.backend.vk.image != vk::NULL_HANDLE);
+		test::@check(image.backend.vk.image != null);
 	};
 }
 
@@ -166,8 +166,8 @@ fn void shader_init_graphics_vk_test() @test
 	{
 		Shader shader = vk_test_shader(device)!!;
 		defer shader_deinit(&shader, device);
-		test::@check(shader.backend.vk.vertex_module != vk::NULL_HANDLE);
-		test::@check(shader.backend.vk.pixel_module != vk::NULL_HANDLE);
+		test::@check(shader.backend.vk.vertex_module != null);
+		test::@check(shader.backend.vk.pixel_module != null);
 		ShaderStages stages = shader_stages(&shader);
 		test::@check(stages.vertex);
 		test::@check(stages.pixel);
@@ -185,8 +185,8 @@ fn void pipeline_init_graphics_vk_test() @test
 			.colors = { { .format = RGBA8_UNORM } },
 		})!!;
 		defer pipeline_deinit(&pipeline, device);
-		test::@check(pipeline.backend.vk.pipeline != vk::NULL_HANDLE);
-		test::@check(pipeline.backend.vk.layout != vk::NULL_HANDLE);
+		test::@check(pipeline.backend.vk.pipeline != null);
+		test::@check(pipeline.backend.vk.layout != null);
 	};
 }
 
@@ -207,8 +207,8 @@ fn void pipeline_init_graphics_depth_blend_vk() @test
 			.has_depth = true,
 		})!!;
 		defer pipeline_deinit(&pipeline, device);
-		test::@check(pipeline.backend.vk.pipeline != vk::NULL_HANDLE);
-		test::@check(pipeline.backend.vk.layout != vk::NULL_HANDLE);
+		test::@check(pipeline.backend.vk.pipeline != null);
+		test::@check(pipeline.backend.vk.layout != null);
 	};
 }
 

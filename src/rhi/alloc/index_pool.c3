@@ -30,7 +30,7 @@ struct IndexPool
 }
 
 // Reserve IDs `[0, reserve)`. `reserve` must be > 0.
-fn void IndexPool.init(&self, uint reserve, Allocator allocator = mem)
+fn void IndexPool.init(&self, uint reserve, alloc::Allocator allocator = mem)
 {
 	assert(reserve > 0);
 	self.available.init(allocator, 1);

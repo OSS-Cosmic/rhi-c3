@@ -1,0 +1,15 @@
+package(default_visibility = ["//visibility:public"])
+
+load("//tools:examples.bzl", "rhi_example")
+load("//tools:slang.bzl", "shader_set")
+
+shader_set([
+    ("//examples/assets:01_mandelbrot.slang", "vertexMain", "vertex", "fullscreen.vert"),
+    ("//examples/assets:01_mandelbrot.slang", "fragmentMain", "fragment", "mandelbrot.frag"),
+])
+
+rhi_example(
+    name = "01_shader",
+    backends = ["vulkan", "dx12", "metal", "web"],
+    has_shaders = True,
+)

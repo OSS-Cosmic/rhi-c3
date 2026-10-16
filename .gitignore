@@ -7,12 +7,11 @@
 __pycache__/
 *.pyc
 
-# Meson build dir
-/build-meson/
+# Bazel
+/bazel-*
 
-# Vendored libraries (built by Meson, see meson.build)
+# Stale prebuilt vendor libraries
 /vendor/lib/
-/vendor/volk/lib/
 /vendor/imgui_c/lib/
 /vendor/d3d12ma/lib/
 

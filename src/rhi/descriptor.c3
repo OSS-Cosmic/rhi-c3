@@ -179,6 +179,30 @@ fn Descriptor descriptor_storage_buffer(Buffer* b, ulong offset, ulong range)
 // Image view descriptor. Only `.Sampled_Image` and `.Storage_Image` are image
 // kinds; anything else yields an empty descriptor. The cookie comes from the
 // view's own cookie, so distinct views of one image get distinct descriptors.
+// A top-level acceleration structure for a shader's ray query. Vulkan only;
+// empty on other backends.
+fn Descriptor descriptor_acceleration_structure(AccelStructure* as)
+{
+	if (as == null || as.cookie == 0 || as.type != TOP_LEVEL) return {};
+	Descriptor d = {
+		.cookie = descriptor_cookie(as.cookie, ACCELERATION_STRUCTURE, 0, 0),
+		.type = ACCELERATION_STRUCTURE,
+	};
+	switch (renderer.backend)
+	{
+		case VK:
+			$if HAS_VK:
+				d.handle = (ulong)as.backend.vk.handle;
+			$endif
+		case DX12:
+		case MTL:
+		case WGPU:
+		case WEBGL:
+			return {};
+	}
+	return d;
+}
+
 fn Descriptor descriptor_image(ImageView* v, DescriptorType kind)
 {
 	if (kind != SAMPLED_IMAGE && kind != STORAGE_IMAGE) return {};

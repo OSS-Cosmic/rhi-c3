@@ -17,17 +17,17 @@ fn vk::DescriptorSetLayout? rpi_test_descriptor_set_layout(Device* device)
 {
 	vk::DescriptorSetLayoutBinding binding = {
 		.binding = 0,
-		.descriptorType = vk::DescriptorType.SAMPLER,
+		.descriptorType = vk::DescriptorType.DESCRIPTOR_TYPE_SAMPLER,
 		.descriptorCount = 1,
-		.stageFlags = vk::SHADER_STAGE_FRAGMENT_BIT,
+		.stageFlags = vk::ShaderStageFlagBits.SHADER_STAGE_FRAGMENT_BIT,
 	};
 	vk::DescriptorSetLayoutCreateInfo info = {
-		.sType = vk::StructureType.DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
 		.bindingCount = 1,
 		.pBindings = &binding,
 	};
 	vk::DescriptorSetLayout layout;
-	vk_check(device.backend.vk.vtable.createDescriptorSetLayout(
+	vk_check(vk::vkCreateDescriptorSetLayout(
 		device.backend.vk.device, &info, null, &layout))!!;
 	return layout;
 }
@@ -49,14 +49,14 @@ fn void rpi_descriptor_set_alloc_resolve_vk() @test
 	@with_rpi_allocator_device(; Device* device)
 	{
 		vk::DescriptorSetLayout layout = rpi_test_descriptor_set_layout(device)!!;
-		defer device.backend.vk.vtable.destroyDescriptorSetLayout(device.backend.vk.device, layout, null);
+		defer vk::destroyDescriptorSetLayout(device.backend.vk.device, layout, null);
 		RpiDescriptorSetAlloc allocator = rpi_descriptor_set_alloc_init(layout, { .sampler = 1 }, RPI_FRAMES_IN_FLIGHT);
 		defer rpi_descriptor_set_alloc_free(&allocator, device);
 
 		bool found;
 		RpiDescriptorSetSlot* set_a = rpi_descriptor_set_alloc_resolve(&allocator, device, 0, 0xA, &found)!!;
 		test::@check(!found);
-		test::@check(set_a != null && set_a.handle != 0);
+		test::@check(set_a != null && set_a.handle != null);
 		vk::DescriptorSet a_handle = set_a.handle;
 
 		RpiDescriptorSetSlot* set_a2 = rpi_descriptor_set_alloc_resolve(&allocator, device, 1, 0xA, &found)!!;
@@ -83,7 +83,7 @@ fn void rpi_descriptor_set_alloc_grows_pools_vk() @test
 	@with_rpi_allocator_device(; Device* device)
 	{
 		vk::DescriptorSetLayout layout = rpi_test_descriptor_set_layout(device)!!;
-		defer device.backend.vk.vtable.destroyDescriptorSetLayout(device.backend.vk.device, layout, null);
+		defer vk::destroyDescriptorSetLayout(device.backend.vk.device, layout, null);
 		RpiDescriptorSetAlloc allocator = rpi_descriptor_set_alloc_init(layout, { .sampler = 1 }, RPI_FRAMES_IN_FLIGHT);
 		defer rpi_descriptor_set_alloc_free(&allocator, device);
 
@@ -109,7 +109,7 @@ fn void rpi_descriptor_set_alloc_recycle_lone_slot_vk() @test
 	@with_rpi_allocator_device(; Device* device)
 	{
 		vk::DescriptorSetLayout layout = rpi_test_descriptor_set_layout(device)!!;
-		defer device.backend.vk.vtable.destroyDescriptorSetLayout(device.backend.vk.device, layout, null);
+		defer vk::destroyDescriptorSetLayout(device.backend.vk.device, layout, null);
 		RpiDescriptorSetAlloc allocator = rpi_descriptor_set_alloc_init(layout, { .sampler = 1 }, RPI_FRAMES_IN_FLIGHT);
 		defer rpi_descriptor_set_alloc_free(&allocator, device);
 
@@ -153,7 +153,7 @@ fn vk::Bool32 program_test_messenger_callback(
 	void* user_data)
 {
 	ProgramTestEnv* env = (ProgramTestEnv*)user_data;
-	if (message_severity & vk::DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
+	if (message_severity & vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
 	{
 		atomic::fetch_add(&env.errors, 1u);
 		log::error("rpi program Vulkan validation error: %s", callback_data.pMessage);
@@ -169,16 +169,16 @@ fn bool program_test_env_init(ProgramTestEnv* env)
 		log::info("rpi program test skipped: Vulkan renderer unavailable");
 		return false;
 	}
-	if (vk::createDebugUtilsMessengerEXT)
+	if (vk::extensions.vkCreateDebugUtilsMessengerEXT)
 	{
 		vk::DebugUtilsMessengerCreateInfoEXT info = {
-			.sType = vk::StructureType.vk::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-			.pfnUserCallback = &program_test_messenger_callback,
+			.sType = vk::StructureType.STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+			.pfnUserCallback = (vk::PFN_vkDebugUtilsMessengerCallbackEXT)&program_test_messenger_callback,
 			.pUserData = env,
-			.messageSeverity = vk::DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | vk::DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-			.messageType = vk::DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | vk::DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | vk::DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+			.messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | vk::DebugUtilsMessageSeverityFlagBitsEXT.DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+			.messageType = vk::DebugUtilsMessageTypeFlagBitsEXT.DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | vk::DebugUtilsMessageTypeFlagBitsEXT.DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | vk::DebugUtilsMessageTypeFlagBitsEXT.DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
 		};
-		if (catch err = vk_check(vk::createDebugUtilsMessengerEXT(renderer.vk.instance, &info, null, &env.messenger)))
+		if (catch err = vk_check(vk::extensions.vkCreateDebugUtilsMessengerEXT(renderer.vk.instance, &info, null, &env.messenger)))
 		{
 			log::info("rpi program test skipped: debug messenger unavailable");
 			renderer_deinit();
@@ -219,10 +219,10 @@ fn void program_test_env_deinit(ProgramTestEnv* env)
 		env.has_dev = false;
 	}
 	env.adapters.free();
-	if (env.messenger != 0 && vk::destroyDebugUtilsMessengerEXT)
+	if (env.messenger != (vk::DebugUtilsMessengerEXT)0 && vk::extensions.vkDestroyDebugUtilsMessengerEXT)
 	{
-		vk::destroyDebugUtilsMessengerEXT(renderer.vk.instance, env.messenger, null);
-		env.messenger = 0;
+		vk::extensions.vkDestroyDebugUtilsMessengerEXT(renderer.vk.instance, env.messenger, null);
+		env.messenger = (vk::DebugUtilsMessengerEXT)0;
 	}
 	renderer_deinit();
 }
@@ -427,4 +427,59 @@ fn void rpi_program_bind_descriptors_vk() @test
 	program_deinit(&program, device);
 	program_test_env_deinit(&env);
 	program_test_expect_no_validation_errors(&env);
+}
+
+const char[*] RPI_TEST_FILL_COMP_SPV @align(4) = $embed("testdata/fill.comp.spv");
+
+struct FillPush
+{
+	uint bias;
+	uint count;
+}
+
+fn void rpi_program_compute_dispatch_vk() @test
+{
+	ProgramTestEnv env;
+	if (!program_test_env_init(&env)) return;
+	Device* device = &env.dev;
+
+	ProgramModuleStage[1] modules = {
+		{ .stage = COMPUTE, .data = RPI_TEST_FILL_COMP_SPV[..], .entry_point = "main" },
+	};
+	ProgramLayoutBinding[1] bindings = {
+		{ .name = "outBuf", .set = 0, .binding = 0, .descriptor_type = STORAGE_BUFFER, .count = 1, .stages = { .compute = true } },
+	};
+	Program program = program_init(device, modules[..], {
+		.bindings = bindings[..],
+		.push_constant = { .stages = { .compute = true }, .size = FillPush::size },
+		.has_push_constant = true,
+	})!!;
+	defer program_deinit(&program, device);
+
+	const uint COUNT = 200;
+	ulong bytes = COUNT * uint::size;
+	Buffer out = buffer_init_general(device, { .size = bytes, .usage = { .shader_resource_storage = true, .transfer_dst = true }, .buffer_usage = READBACK })!!;
+	defer buffer_deinit(&out, device);
+
+	Pool pool = pool_init(device, &device.graphics_queue)!!;
+	defer pool_deinit(&pool, device);
+	Cmd cmd = cmd_init(device, &pool)!!;
+	defer cmd_deinit(&cmd, device, &pool);
+
+	cmd_begin(&cmd, device)!!;
+	program_bind_compute_pipeline(&program, device, &cmd, 1)!!;
+	program_bind_compute_pipeline(&program, device, &cmd, 1)!!;
+	test::eq(program.pipelines.len(), 1);
+	DescriptorBinding[1] binds = { descriptor_binding("outBuf", descriptor_storage_buffer(&out, 0, bytes), 0) };
+	program_bind_descriptors(&program, device, &cmd, 0, binds[..], COMPUTE)!!;
+	FillPush push = { .bias = 7, .count = COUNT };
+	program_push_constants(&program, device, &cmd, ((char*)&push)[:FillPush::size], 0);
+	cmd_dispatch(&cmd, device, (COUNT + 63) / 64);
+	cmd_buffer_barrier(&cmd, device, { .buffer = &out, .before = { .storage_write = true }, .after = { .host_read = true }, .size = bytes });
+	program_test_submit(&cmd, device);
+
+	uint* data = (uint*)out.mapped_region.ptr;
+	for (uint i = 0; i < COUNT; i++) test::eq(data[i], i * 3 + 7);
+	program_test_expect_no_validation_errors(&env);
+	program_test_env_deinit(&env);
 }

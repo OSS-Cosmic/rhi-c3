@@ -5,7 +5,7 @@
 //
 // The ImGui renderer and its embedded shaders live in rhi::imgui. This file
 // owns only the example lifecycle and the SDL -> ImGui input translation.
-module example_03_imgui @feat((RHI_VK & (LINUX | WIN32) | RHI_MTL & DARWIN) & RHI_IMGUI & !RHI_HEADLESS & !WASM);
+module example_03_imgui @feat(((RHI_VK & (LINUX | WIN32)) | (RHI_MTL & DARWIN)) & RHI_IMGUI & !RHI_HEADLESS & !WASM);
 
 import std::collections::list;
 import imgui;

@@ -22,53 +22,48 @@ and `RHI_HEADLESS` is off. See `HAS_*` consts in `src/rhi/rhi.c3`.
 
 ```text
 src/rhi/        backend-neutral front + per-backend code (vk_*, mtl_*, dx12_*, webgpu, webgl)
-src/vendor/     bindings: vulkan, vma, metal, sdl3, imgui
+src/vendor/     bindings: vma, metal, sdl3, imgui
+vendor/vulkan.c3l/ Vulkan.c3 bindings and runtime loader (submodule)
 vendor/         native sources: VulkanMemoryAllocator, d3d12ma, imgui_c (+ imgui submodule)
 examples/       00_clear .. 05_texture, shared platform harness, slang shaders
 test/           c3 @test functions, mirror src/
-tools/          build helpers (meson drives these)
 ```
 
 ## Prerequisites
 
 Common:
 
-- C3 0.8 (`c3c`, tested with 0.8.4) on `PATH`, or set `$C3C`.
-- Meson >= 1.1, Python 3, C and C++17 compilers, `ar`.
-- volk submodule (Vulkan loader): `git submodule update --init vendor/volk`
-- C3 0.8's SDL3 vendor package for native examples and tests:
-  `c3c vendor-fetch sdl3`.
+- C3 0.8 (`c3c`, tested with 0.8.4) on `PATH` (or `C3C=/path/to/c3c`; falls back to `~/opt/c3/c3c`).
+- Bazel 9 (`bazel`; version pinned in `.bazelversion`), C and C++17 compilers, `cmake` (builds SDL3 from source).
+- Vulkan.c3 submodule: `git submodule update --init vendor/vulkan.c3l`
+- C3's `sdl3` vendor package is fetched automatically with `c3c vendor-fetch sdl3`; the native SDL3 shared library is built by Bazel.
 - Dear ImGui submodule, for `03_imgui` and `04_svt`:
   `git submodule update --init vendor/imgui_c/imgui`
-- `slangc` and `spirv-cross` for shaders. Set `SLANGC` / `SPIRV_CROSS` (or `-Dslangc=` /
-  `-Dspirv_cross=`) to use existing binaries. `spirv-cross` is only needed for WebGL2 GLSL.
+- `slangc` and `spirv-cross` for shaders. Put them on `PATH` or set `SLANGC=` /
+  `SPIRV_CROSS=`. `spirv-cross` is only needed for WebGL2 GLSL.
 
 Per backend:
 
-- **Vulkan**: Vulkan loader/driver at runtime, Vulkan headers to build VMA and volk.
-  volk opens the loader at run time, nothing links libvulkan.
+- **Vulkan**: Vulkan loader/driver at runtime. Vulkan.c3 loads the loader at run
+  time, so nothing links `libvulkan`.
   Initialize VMA with `git submodule update --init vendor/VulkanMemoryAllocator`.
 - **Metal**: macOS arm64, Xcode toolchain. Links `Metal`, `Foundation`,
   `QuartzCore` frameworks and the Objective-C runtime.
 - **D3D12**: Windows 10+ with a D3D12 device. Cross-building from Linux needs
-  mingw-w64 (`x86_64-w64-mingw32-g++`) for D3D12MA, or set `D3D12MA_CXX`.
+  mingw-w64 (`x86_64-w64-mingw32-g++`) for D3D12MA (`//:d3d12ma`, tagged `manual`).
 
 ## Build vendor libraries
 
-Meson builds the C++ archives that c3c links. Build dir must not be `build/`
-(c3c owns it).
+Bazel builds the C++ archives that c3c links and passes them to every c3 action.
 
 ```sh
-meson setup build-meson
-meson compile -C build-meson     # vendor/lib/libvma.a, vendor/imgui_c/lib/libimgui.a
+bazel build //:vma //:imgui      # libvma.a, libimgui.a under bazel-bin/
 ```
 
-D3D12MemAlloc is opt-in and not built by default:
+D3D12MemAlloc is opt-in (`manual` tag) and needs a mingw toolchain:
 
 ```sh
-meson compile -C build-meson d3d12ma
-# custom compiler:
-meson setup build-meson --reconfigure -Dd3d12ma_cxx=/path/to/x86_64-w64-mingw32-g++
+bazel build //:d3d12ma
 ```
 
 ## Build the library per backend
@@ -86,32 +81,31 @@ c3c build -D RHI_HEADLESS           # no windowing/backends
 Output lands in `build/`. Run all compile checks at once:
 
 ```sh
-meson compile -C build-meson check                    # every leg
-meson compile -C build-meson check-windows-x64        # one leg
+bazel build //:check_linux_x64 //:check_windows_x64 //:check_macos_aarch64 \
+            //:check_wasm32 //:check_headless
 ```
 
-Legs: `linux-x64`, `windows-x64`, `macos-aarch64`, `wasm32`, `headless`,
-`tests-macos`. `windows-x64` and `macos-aarch64` are cross compile checks, they
-do not run anything.
+Legs: `check_linux_x64`, `check_windows_x64`, `check_macos_aarch64`, `check_tests_macos`,
+`check_wasm32` (the 00_clear web build), `check_headless`. `windows-x64` and
+`macos-aarch64` are cross compile checks, they do not run anything.
 
 ### Vulkan (Linux / Windows)
 
 ```sh
-meson compile -C build-meson vulkan       # linux examples (linked) + SPIR-V shaders (slangc)
-meson compile -C build-meson check-vulkan
+bazel build //examples/01_shader:vulkan      # linked example + SPIR-V shaders (slangc)
+bazel build //:check_linux_x64
 ```
-Shader targets are skipped when `slangc` is missing (`$SLANGC` or `-Dslangc=`).
-Alias targets: one per backend (`vulkan`, `dx12`, `metal`, `web`), one per example
-(`<backend>-<example>`, e.g. `vulkan-01_shader`, `web-05_texture`), and `examples` for
-everything.
+Each example package exposes `:vulkan`, `:dx12`, `:metal` and `:web` targets
+(where the example supports that backend) and `:shaders_{spirv,metal,wgsl,glsl}`.
+`bazel-bin/examples/<ex>/vulkan` finds its SDL3 beside the binary.
 
 ### Metal (macOS)
 
 Build on a Mac for a real run. From another host only the compile check works:
 
 ```sh
-meson compile -C build-meson metal        # examples + MSL shaders (slangc), compile only
-meson compile -C build-meson check-metal  # c3c build + test compile, no link or run
+bazel build //examples/03_imgui:metal    # MSL shaders (slangc); compile only off macOS
+bazel build //:check_macos_aarch64       # c3c build, no link or run
 ```
 
 Metal shaders are MSL text compiled at run time, entry point name kept from the
@@ -124,9 +118,9 @@ D3D12 is enabled by the `RHI_DX12` feature in `project.json` and only compiles
 on Windows targets.
 
 ```sh
-meson compile -C build-meson d3d12ma      # D3D12MA archive (mingw cross, also built by default)
-meson compile -C build-meson dx12         # cross-compile every example, compile only
-meson compile -C build-meson check-dx12   # c3c library check
+bazel build //:d3d12ma                   # D3D12MA archive (mingw cross)
+bazel build //examples/00_clear:dx12     # cross-compile an example, compile only
+bazel build //:check_windows_x64         # c3c library check
 ```
 
 Backend is not complete yet. Examples fall back to Vulkan on Windows until the
@@ -136,8 +130,8 @@ pipeline yet.
 ## Tests
 
 ```sh
-meson test -C build-meson     # runs c3c test on host
-c3c test                      # directly, after vendor packages/libraries are available
+bazel test //:c3_host        # runs c3c test on host
+c3c test                     # directly, after vendor packages/libraries are available
 ```
 
 The `sdl3` vendor package supplies the platform SDL3 archive and linker metadata.
@@ -181,7 +175,7 @@ together. Vendor archives must exist first (see above).
 ```sh
 c3c compile examples/00_clear/main.c3 examples/platform/platform.c3 'src/**' \
     --libdir . --lib sdl3 \
-    -L vendor/lib -L vendor/imgui_c/lib -l vma -l imgui -l stdc++ \
+    -L bazel-bin -l vma -l imgui -l stdc++ \
     -o build/examples/00_clear/00_clear
 
 ./build/examples/00_clear/00_clear --frames 120
@@ -202,13 +196,14 @@ On macOS drop `-l stdc++` for `-l c++` if the linker asks, and build for
 ### 3. Build for the browser
 
 ```sh
-meson compile -C build-meson web    # 00_clear, 01_shader, 02_mesh, 05_texture
+bazel build //examples/00_clear:web_bundle    # also 01_shader, 02_mesh, 05_texture
 ```
 
 Builds wasm, `.wgsl` (slangc) and `.glsl` (slangc + spirv-cross) shaders and packages
-the bundle. Shader steps are skipped when `slangc` / `spirv-cross` are missing.
+the bundle. Examples with shaders need `slangc` and `spirv-cross`.
 
-Output lands in `build-meson/web/<name>/`, for example `build-meson/web/01_shader/`.
+Output lands in `bazel-bin/examples/<ex>/` as `web.{wasm,html}`; copy it together with
+`examples/platform/web/{glue,webgl_glue}.js` (the `web_bundle` filegroup lists all four).
 Direct c3c, without packaging or shaders:
 
 ```sh
@@ -218,19 +213,13 @@ c3c compile --target wasm32 examples/01_shader/main.c3 examples/platform/platfor
 
 Serve that dir (it holds `index.html`, `glue.js`,
 `webgl_glue.js` from `examples/platform/web/`, the `.wasm`, and the `.wgsl` /
-`.glsl` shaders), e.g. `python3 -m http.server -d build-meson/web/01_shader`. Browser boot is WebGPU first, WebGL2 fallback. A wasm build
+`.glsl` shaders), e.g. `python3 -m http.server -d bazel-bin/examples/01_shader` then open `web.html`. Browser boot is WebGPU first, WebGL2 fallback. A wasm build
 that compiles is not proof it runs: the bundle must also pass the import and
 lifecycle export checks (`examples/platform/web/bundle_test.mjs`).
 
-## Regenerating Vulkan bindings
+## Vulkan bindings
 
-`src/vendor/vulkan/` is generated and committed.
-
-```sh
-python3 tools/gen_vulkan.py [path/to/vk.xml]   # default /usr/share/vulkan/registry/vk.xml
-```
-
-Output is deterministic: matching registry leaves `git diff` empty.
+Vulkan types, commands, and runtime loading come from the `vendor/vulkan.c3l` submodule.
 
 ## License
 

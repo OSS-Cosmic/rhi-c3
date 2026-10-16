@@ -1,0 +1,16 @@
+package(default_visibility = ["//visibility:public"])
+
+load("//tools:examples.bzl", "rhi_example")
+load("//tools:slang.bzl", "shader_set")
+
+shader_set([
+    ("//examples/assets:imgui.slang", "vertexMain", "vertex", "imgui.vert"),
+    ("//examples/assets:imgui.slang", "fragmentMain", "fragment", "imgui.frag"),
+])
+
+rhi_example(
+    name = "03_imgui",
+    backends = ["vulkan", "dx12", "metal"],
+    imgui = True,
+    has_shaders = True,
+)

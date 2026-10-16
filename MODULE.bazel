@@ -1,0 +1,20 @@
+module(name = "rhi_c3", version = "0.1.0")
+
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "rules_cc", version = "0.2.17")
+bazel_dep(name = "rules_foreign_cc", version = "0.14.0")
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "sdl3",
+    build_file = "//third_party:sdl3.BUILD",
+    sha256 = "515ee4ad6e910e0ad8d8bbccb24ac52dd16c419e23eea3fb83541d20130c7aaa",
+    strip_prefix = "SDL-release-3.4.2",
+    urls = ["https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.2.tar.gz"],
+)
+
+c3c_repo = use_repo_rule("//tools:c3c_repo.bzl", "c3c_repo")
+
+c3c_repo(name = "c3c")

@@ -334,7 +334,7 @@ fn void? command_ring_element_wait_vk(CommandRingElement* e, Device* device)
 {
 	if (e == null || e.backend.vk.fence == (vk::Fence)0) return;
 	vk::Fence fence = e.backend.vk.fence;
-	return vk_check(device.backend.vk.vtable.waitForFences(
+	return vk_check(vk::vkWaitForFences(
 		device.backend.vk.device, 1, &fence, vk::TRUE, ulong::max));
 }
 
@@ -350,15 +350,15 @@ fn CommandRingBuffer{POOL_COUNT, CMD_PER_POOL, SYNC_PRIMITIVE}? command_ring_buf
 		{
 			result.cmds[pool_index][cmd_index] = cmd_init(device, &result.pools[pool_index])!;
 			$if SYNC_PRIMITIVE:
-				vk::SemaphoreCreateInfo semaphore_info = { .sType = SEMAPHORE_CREATE_INFO };
-				vk_check(device.backend.vk.vtable.createSemaphore(
+				vk::SemaphoreCreateInfo semaphore_info = { .sType = vk::StructureType.STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+				vk_check(vk::vkCreateSemaphore(
 					device.backend.vk.device, &semaphore_info, null,
 					&result.backend.vk.semaphores[pool_index][cmd_index]))!;
 				vk::FenceCreateInfo fence_info = {
-					.sType = FENCE_CREATE_INFO,
-					.flags = vk::FENCE_CREATE_SIGNALED_BIT,
+					.sType = vk::StructureType.STRUCTURE_TYPE_FENCE_CREATE_INFO,
+					.flags = vk::FenceCreateFlagBits.FENCE_CREATE_SIGNALED_BIT,
 				};
-				vk_check(device.backend.vk.vtable.createFence(
+				vk_check(vk::vkCreateFence(
 					device.backend.vk.device, &fence_info, null,
 					&result.backend.vk.fences[pool_index][cmd_index]))!;
 			$endif
@@ -378,9 +378,9 @@ fn void command_ring_buffer_deinit_vk(CommandRingBuffer{POOL_COUNT, CMD_PER_POOL
 		$if SYNC_PRIMITIVE:
 			for (sz cmd_index = 0; cmd_index < CMD_PER_POOL; cmd_index++)
 			{
-				device.backend.vk.vtable.destroySemaphore(
+				vk::destroySemaphore(
 					device.backend.vk.device, r.backend.vk.semaphores[pool_index][cmd_index], null);
-				device.backend.vk.vtable.destroyFence(
+				vk::destroyFence(
 					device.backend.vk.device, r.backend.vk.fences[pool_index][cmd_index], null);
 			}
 		$endif

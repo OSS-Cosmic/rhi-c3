@@ -1,9 +1,9 @@
 {
   "langrev": "1",
   "warnings":  [ "no-unused" ],
-  "dependency-search-paths":  [ "." ],
-  // Vulkan types come from the vendor package; Volk remains the runtime loader.
-  "dependencies":  [ "sdl3", "vulkan" ],
+  "dependency-search-paths":  [ ".", "vendor" ],
+  // Vulkan.c3 supplies the Vulkan bindings and runtime loader.
+  "dependencies":  [ "sdl3", "vk" ],
   "authors":  [ "Michael Pollind" ],
   "version": "0.1.0",
   "sources":  [ "src/**" ],
@@ -17,8 +17,8 @@
     "RHI_IMGUI",
     "RHI_DX12"
  ],
-  "linker-search-paths":  [ "vendor/lib", "vendor/imgui_c/lib", "vendor/volk/lib" ],
-  "linked-libraries":  [ "vma", "imgui", "volk", "stdc++" ],
+  "linker-search-paths":  [ "vendor/lib", "vendor/imgui_c/lib" ],
+  "linked-libraries":  [ "vma", "imgui", "stdc++" ],
   "output": "build",
   "targets": {
     "rhi": {

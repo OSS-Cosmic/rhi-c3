@@ -64,19 +64,20 @@ fn Cmd? cmd_init(Device* device, Pool* pool)
 		case VK:
 			$if HAS_VK:
 				vk::CommandBufferAllocateInfo info = {
-					.sType = vk::StructureType.COMMAND_BUFFER_ALLOCATE_INFO,
+					.sType = vk::StructureType.STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
 					.commandPool = pool.backend.vk.pool,
-					.level = vk::CommandBufferLevel.PRIMARY,
+					.level = vk::CommandBufferLevel.COMMAND_BUFFER_LEVEL_PRIMARY,
 					.commandBufferCount = 1,
 				};
 				vk::CommandBuffer command_buffer;
-				vk_check(device.backend.vk.vtable.allocateCommandBuffers(device.backend.vk.device, &info, &command_buffer))!;
+				vk_check(vk::vkAllocateCommandBuffers(device.backend.vk.device, &info, &command_buffer))!;
 				Cmd c = { .backend.vk = { .cmd = command_buffer } };
-				// The Vulkan device does not track ray-tracing pipeline or
-				// acceleration-structure features yet, so both stay off and
-				// ray-tracing stages drop out of derived barrier masks, as HPL2
-				// does on a device without RT.
-				c.barrier_capabilities = {};
+				// device_init enables these features whenever the adapter has them,
+				// so the adapter flags say which barrier states are legal.
+				c.barrier_capabilities = {
+					.ray_tracing_pipeline_enabled = device.adapter.backend.vk.is_ray_tracing_pipeline_supported,
+					.acceleration_structure_enabled = device.adapter.backend.vk.is_acceleration_structure_supported,
+				};
 				return c;
 			$endif
 		case DX12:
@@ -133,7 +134,7 @@ fn void cmd_deinit(Cmd* c, Device* device, Pool* pool)
 			$if HAS_VK:
 				{
 					Cmd* cmd = c;
-					device.backend.vk.vtable.freeCommandBuffers(device.backend.vk.device, pool.backend.vk.pool, 1, &cmd.backend.vk.cmd);
+					vk::freeCommandBuffers(device.backend.vk.device, pool.backend.vk.pool, 1, &cmd.backend.vk.cmd);
 					cmd.backend.vk = {};
 				}
 			$endif
@@ -191,10 +192,10 @@ fn void? cmd_begin(Cmd* c, Device* device)
 				{
 					Cmd* cmd = c;
 					vk::CommandBufferBeginInfo info = {
-						.sType = vk::StructureType.COMMAND_BUFFER_BEGIN_INFO,
-						.flags = vk::COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+						.sType = vk::StructureType.STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+						.flags = vk::CommandBufferUsageFlagBits.COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
 					};
-					return vk_check(device.backend.vk.vtable.beginCommandBuffer(cmd.backend.vk.cmd, &info));
+					return vk_check(vk::vkBeginCommandBuffer(cmd.backend.vk.cmd, &info));
 				}
 			$endif
 		case DX12:
@@ -255,7 +256,7 @@ fn void? cmd_end(Cmd* c, Device* device)
 			$if HAS_VK:
 				{
 					Cmd* cmd = c;
-					return vk_check(device.backend.vk.vtable.endCommandBuffer(cmd.backend.vk.cmd));
+					return vk_check(vk::vkEndCommandBuffer(cmd.backend.vk.cmd));
 				}
 			$endif
 		case DX12:
@@ -318,7 +319,7 @@ fn void cmd_set_viewport(Cmd* c, Device* device, Viewport vp)
 						.minDepth = viewport.min_depth,
 						.maxDepth = viewport.max_depth,
 					};
-					device.backend.vk.vtable.cmdSetViewport(cmd.backend.vk.cmd, 0, 1, &vk_viewport);
+					vk::cmdSetViewport(cmd.backend.vk.cmd, 0, 1, &vk_viewport);
 				}
 			$endif
 		case DX12:
@@ -336,7 +337,7 @@ fn void cmd_set_viewport(Cmd* c, Device* device, Viewport vp)
 						y += height;
 						height = -height;
 					}
-					d3d12::Viewport vp = {
+					d3d12::Viewport d3d_viewport = {
 						.top_left_x = viewport.x,
 						.top_left_y = y,
 						.width = viewport.width,
@@ -344,7 +345,7 @@ fn void cmd_set_viewport(Cmd* c, Device* device, Viewport vp)
 						.min_depth = viewport.min_depth,
 						.max_depth = viewport.max_depth,
 					};
-					list.vtbl.rs_set_viewports(list, 1, &vp);
+					list.vtbl.rs_set_viewports(list, 1, &d3d_viewport);
 				}
 			$endif
 		case MTL:
@@ -388,7 +389,7 @@ fn void cmd_set_scissor(Cmd* c, Device* device, std::math::geometry::Rect rect)
 						.offset = { .x = (int)rect.x, .y = (int)rect.y },
 						.extent = { .width = (uint)rect.width, .height = (uint)rect.height },
 					};
-					device.backend.vk.vtable.cmdSetScissor(cmd.backend.vk.cmd, 0, 1, &scissor);
+					vk::cmdSetScissor(cmd.backend.vk.cmd, 0, 1, &scissor);
 				}
 			$endif
 		case DX12:
@@ -416,7 +417,7 @@ fn void cmd_set_scissor(Cmd* c, Device* device, std::math::geometry::Rect rect)
 				{
 					assert(c.backend.wgpu.pass != 0, "scissor requires an active render pass");
 					assert(rect.x >= 0 && rect.y >= 0, "scissor coordinates must be nonnegative");
-					wgpu_render_pass_set_scissor_rect(c.backend.wgpu.pass, (uint)rect.x, (uint)rect.y, rect.width, rect.height);
+					wgpu_render_pass_set_scissor_rect(c.backend.wgpu.pass, (uint)rect.x, (uint)rect.y, (uint)rect.width, (uint)rect.height);
 				}
 			$endif
 		case WEBGL:
@@ -437,7 +438,7 @@ fn void cmd_draw(Cmd* c, Device* device, uint vertex_count, uint instance_count 
 				{
 					Cmd* cmd = c;
 					(void)device;
-					device.backend.vk.vtable.cmdDraw(cmd.backend.vk.cmd, vertex_count, instance_count, first_vertex, first_instance);
+					vk::cmdDraw(cmd.backend.vk.cmd, vertex_count, instance_count, first_vertex, first_instance);
 				}
 			$endif
 		case DX12:
@@ -474,6 +475,27 @@ fn void cmd_draw(Cmd* c, Device* device, uint vertex_count, uint instance_count 
 	}
 }
 
+// Dispatches the bound compute pipeline over `x * y * z` workgroups. Bind it
+// with `program_bind_compute_pipeline` first. Vulkan only.
+fn void cmd_dispatch(Cmd* c, Device* device, uint x, uint y = 1, uint z = 1)
+{
+	switch (renderer.backend)
+	{
+		case VK:
+			$if HAS_VK:
+				{
+					(void)device;
+					vk::cmdDispatch(c.backend.vk.cmd, x, y, z);
+				}
+			$endif
+		case DX12:
+		case MTL:
+		case WGPU:
+		case WEBGL:
+			unreachable("cmd_dispatch: compute is only implemented for Vulkan");
+	}
+}
+
 fn void cmd_draw_indexed(Cmd* c, Device* device, uint index_count, uint instance_count = 1, uint first_index = 0, int vertex_offset = 0, uint first_instance = 0)
 {
 	switch (renderer.backend)
@@ -483,7 +505,7 @@ fn void cmd_draw_indexed(Cmd* c, Device* device, uint index_count, uint instance
 				{
 					Cmd* cmd = c;
 					(void)device;
-					device.backend.vk.vtable.cmdDrawIndexed(cmd.backend.vk.cmd, index_count, instance_count, first_index, vertex_offset, first_instance);
+					vk::cmdDrawIndexed(cmd.backend.vk.cmd, index_count, instance_count, first_index, vertex_offset, first_instance);
 				}
 			$endif
 		case DX12:
@@ -535,7 +557,7 @@ fn void cmd_draw_indirect(Cmd* c, Device* device, Buffer* buffer, ulong offset, 
 				{
 					Cmd* cmd = c;
 					(void)device;
-					device.backend.vk.vtable.cmdDrawIndirect(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, draw_count, stride);
+					vk::cmdDrawIndirect(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, draw_count, stride);
 				}
 			$endif
 		case DX12:
@@ -599,7 +621,7 @@ fn void cmd_draw_indexed_indirect(Cmd* c, Device* device, Buffer* buffer, ulong 
 				{
 					Cmd* cmd = c;
 					(void)device;
-					device.backend.vk.vtable.cmdDrawIndexedIndirect(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, draw_count, stride);
+					vk::cmdDrawIndexedIndirect(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, draw_count, stride);
 				}
 			$endif
 		case DX12:
@@ -664,7 +686,7 @@ fn void cmd_draw_indirect_count(Cmd* c, Device* device, Buffer* buffer, ulong of
 				{
 					Cmd* cmd = c;
 					(void)device;
-					device.backend.vk.vtable.cmdDrawIndirectCount(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, count_buffer.backend.vk.buffer, count_offset, max_draw_count, stride);
+					vk::cmdDrawIndirectCount(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, count_buffer.backend.vk.buffer, count_offset, max_draw_count, stride);
 				}
 			$endif
 		case DX12:
@@ -713,7 +735,7 @@ fn void cmd_bind_pipeline(Cmd* c, Device* device, Pipeline* pipeline)
 				{
 					Cmd* cmd = c;
 					(void)device;
-					device.backend.vk.vtable.cmdBindPipeline(cmd.backend.vk.cmd, vk::PipelineBindPoint.GRAPHICS, pipeline.backend.vk.pipeline);
+					vk::cmdBindPipeline(cmd.backend.vk.cmd, vk::PipelineBindPoint.PIPELINE_BIND_POINT_GRAPHICS, pipeline.backend.vk.pipeline);
 				}
 			$endif
 		case DX12:
@@ -777,7 +799,7 @@ fn void cmd_set_push_constants(Cmd* c, Device* device, Pipeline* pipeline, char[
 				{
 					Cmd* cmd = c;
 					(void)device;
-					device.backend.vk.vtable.cmdPushConstants(cmd.backend.vk.cmd, pipeline.backend.vk.layout, vk::SHADER_STAGE_VERTEX_BIT, 0, (uint)bytes.len, bytes.ptr);
+					vk::cmdPushConstants(cmd.backend.vk.cmd, pipeline.backend.vk.layout, vk::ShaderStageFlagBits.SHADER_STAGE_VERTEX_BIT, 0, (uint)bytes.len, bytes.ptr);
 				}
 			$endif
 		case DX12:
@@ -848,7 +870,7 @@ fn void cmd_clear_attachment_regions(Cmd* c, Device* device, CmdClearRegion[] re
 					foreach (region : regions)
 					{
 						vk::ClearAttachment attachment = {
-							.aspectMask = vk::IMAGE_ASPECT_COLOR_BIT,
+							.aspectMask = vk::ImageAspectFlagBits.IMAGE_ASPECT_COLOR_BIT,
 							.colorAttachment = 0,
 							.clearValue = { .color = { .float32 = region.color } },
 						};
@@ -860,7 +882,7 @@ fn void cmd_clear_attachment_regions(Cmd* c, Device* device, CmdClearRegion[] re
 							.baseArrayLayer = 0,
 							.layerCount = 1,
 						};
-						device.backend.vk.vtable.cmdClearAttachments(cmd.backend.vk.cmd, 1, &attachment, 1, &rect);
+						vk::cmdClearAttachments(cmd.backend.vk.cmd, 1, &attachment, 1, &rect);
 					}
 				}
 			$endif
@@ -1100,9 +1122,9 @@ fn void cmd_begin_rendering(Cmd* c, Device* device, CmdBeginRenderingOptions opt
 					foreach (i, color : options.color_attachments)
 					{
 						colors[i] = {
-							.sType = vk::StructureType.RENDERING_ATTACHMENT_INFO,
+							.sType = vk::StructureType.STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 							.imageView = color.view.backend.vk.view,
-							.imageLayout = vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL,
+							.imageLayout = vk::ImageLayout.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 							.loadOp = vk_load_op(color.load_op),
 							.storeOp = vk_store_op(color.store_op),
 							.clearValue = { .color = { .float32 = color.clear_color } },
@@ -1111,7 +1133,7 @@ fn void cmd_begin_rendering(Cmd* c, Device* device, CmdBeginRenderingOptions opt
 					vk::RenderingAttachmentInfo depth;
 					vk::RenderingAttachmentInfo stencil;
 					vk::RenderingInfo info = {
-						.sType = vk::StructureType.RENDERING_INFO,
+						.sType = vk::StructureType.STRUCTURE_TYPE_RENDERING_INFO,
 						.renderArea = {
 							.offset = { .x = (int)options.render_area.x, .y = (int)options.render_area.y },
 							.extent = { .width = (uint)options.render_area.width, .height = (uint)options.render_area.height },
@@ -1124,9 +1146,9 @@ fn void cmd_begin_rendering(Cmd* c, Device* device, CmdBeginRenderingOptions opt
 					{
 						CmdDepthAttachment d = options.depth_attachment;
 						depth = {
-							.sType = vk::StructureType.RENDERING_ATTACHMENT_INFO,
+							.sType = vk::StructureType.STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 							.imageView = d.view.backend.vk.view,
-							.imageLayout = d.read_only ? vk::ImageLayout.DEPTH_READ_ONLY_OPTIMAL : vk::ImageLayout.DEPTH_ATTACHMENT_OPTIMAL,
+							.imageLayout = d.read_only ? vk::ImageLayout.IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL : vk::ImageLayout.IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
 							.loadOp = vk_load_op(d.load_op),
 							.storeOp = vk_store_op(d.store_op),
 							.clearValue = { .depthStencil = { .depth = d.clear_depth, .stencil = 0 } },
@@ -1135,9 +1157,9 @@ fn void cmd_begin_rendering(Cmd* c, Device* device, CmdBeginRenderingOptions opt
 						if (d.has_stencil)
 						{
 							stencil = {
-								.sType = vk::StructureType.RENDERING_ATTACHMENT_INFO,
+								.sType = vk::StructureType.STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
 								.imageView = d.view.backend.vk.view,
-								.imageLayout = vk::ImageLayout.STENCIL_ATTACHMENT_OPTIMAL,
+								.imageLayout = vk::ImageLayout.IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL,
 								.loadOp = vk_load_op(d.stencil_load_op),
 								.storeOp = vk_store_op(d.stencil_store_op),
 								.clearValue = { .depthStencil = { .depth = d.clear_depth, .stencil = d.clear_stencil } },
@@ -1145,7 +1167,7 @@ fn void cmd_begin_rendering(Cmd* c, Device* device, CmdBeginRenderingOptions opt
 							info.pStencilAttachment = &stencil;
 						}
 					}
-					device.backend.vk.vtable.cmdBeginRendering(cmd.backend.vk.cmd, &info);
+					vk::cmdBeginRendering(cmd.backend.vk.cmd, &info);
 				}
 			$endif
 		case DX12:
@@ -1284,7 +1306,7 @@ fn void cmd_end_rendering(Cmd* c, Device* device)
 				{
 					Cmd* cmd = c;
 					(void)device;
-					device.backend.vk.vtable.cmdEndRendering(cmd.backend.vk.cmd);
+					vk::cmdEndRendering(cmd.backend.vk.cmd);
 				}
 			$endif
 		case DX12:
@@ -1362,7 +1384,7 @@ fn void cmd_bind_vertex_buffers(Cmd* c, Device* device, uint first_binding, Buff
 						if (start == buffers.len) break;
 						uint end = start + 1;
 						while (end < buffers.len && buffers[end] != null) end++;
-						device.backend.vk.vtable.cmdBindVertexBuffers(cmd.backend.vk.cmd, first_binding + start, end - start, &vk_buffers[start], &vk_offsets[start]);
+						vk::cmdBindVertexBuffers(cmd.backend.vk.cmd, first_binding + start, end - start, &vk_buffers[start], &vk_offsets[start]);
 						start = end;
 					}
 				}
@@ -1429,8 +1451,8 @@ fn void cmd_bind_index_buffer(Cmd* c, Device* device, Buffer* buffer, IndexType 
 				{
 					Cmd* cmd = c;
 					(void)device;
-					vk::IndexType vk_index_type = index_type == UINT16 ? vk::IndexType.UINT16 : vk::IndexType.UINT32;
-					device.backend.vk.vtable.cmdBindIndexBuffer(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, vk_index_type);
+					vk::IndexType vk_index_type = index_type == UINT16 ? vk::IndexType.INDEX_TYPE_UINT16 : vk::IndexType.INDEX_TYPE_UINT32;
+					vk::cmdBindIndexBuffer(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, vk_index_type);
 				}
 			$endif
 		case DX12:
@@ -1639,7 +1661,7 @@ fn void cmd_resource_barrier(Cmd* c, Device* device, MemoryBarrier[] memory = {}
 						source = vk_stage_bits_to_vk(barrier.before_stages, barrier.before, cmd.barrier_capabilities);
 						destination = vk_stage_bits_to_vk(barrier.after_stages, barrier.after, cmd.barrier_capabilities);
 						assert(source.ok && destination.ok, "memory barrier uses unsupported access states");
-						vk_memory[memory_count] = { .sType = vk::StructureType.MEMORY_BARRIER_2, .srcStageMask = source.mask, .srcAccessMask = vk_resource_state_to_access(barrier.before), .dstStageMask = destination.mask, .dstAccessMask = vk_resource_state_to_access(barrier.after) };
+						vk_memory[memory_count] = { .sType = vk::StructureType.STRUCTURE_TYPE_MEMORY_BARRIER_2, .srcStageMask = source.mask, .srcAccessMask = vk_resource_state_to_access(barrier.before), .dstStageMask = destination.mask, .dstAccessMask = vk_resource_state_to_access(barrier.after) };
 						memory_count++;
 					}
 					foreach (barrier : buffers)
@@ -1648,7 +1670,7 @@ fn void cmd_resource_barrier(Cmd* c, Device* device, MemoryBarrier[] memory = {}
 						destination = vk_stage_bits_to_vk(barrier.after_stages, barrier.after, cmd.barrier_capabilities);
 						assert(source.ok && destination.ok, "buffer barrier uses unsupported access states");
 						vk_buffers[buffer_count] = {
-							.sType = vk::StructureType.BUFFER_MEMORY_BARRIER_2,
+							.sType = vk::StructureType.STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
 							.srcStageMask = source.mask,
 							.srcAccessMask = vk_resource_state_to_access(barrier.before),
 							.dstStageMask = destination.mask,
@@ -1667,7 +1689,7 @@ fn void cmd_resource_barrier(Cmd* c, Device* device, MemoryBarrier[] memory = {}
 						destination = vk_stage_bits_to_vk(barrier.after_stages, barrier.after, cmd.barrier_capabilities);
 						assert(source.ok && destination.ok, "image barrier uses unsupported access states");
 						vk_images[image_count] = {
-							.sType = vk::StructureType.IMAGE_MEMORY_BARRIER_2,
+							.sType = vk::StructureType.STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
 							.srcStageMask = source.mask,
 							.srcAccessMask = vk_resource_state_to_access(barrier.before),
 							.dstStageMask = destination.mask,
@@ -1689,7 +1711,7 @@ fn void cmd_resource_barrier(Cmd* c, Device* device, MemoryBarrier[] memory = {}
 					}
 					if (memory_count + buffer_count + image_count == 0) return;
 					vk::DependencyInfo dependency = {
-						.sType = vk::StructureType.DEPENDENCY_INFO,
+						.sType = vk::StructureType.STRUCTURE_TYPE_DEPENDENCY_INFO,
 						.memoryBarrierCount = memory_count,
 						.pMemoryBarriers = vk_memory.ptr,
 						.bufferMemoryBarrierCount = buffer_count,
@@ -1697,7 +1719,7 @@ fn void cmd_resource_barrier(Cmd* c, Device* device, MemoryBarrier[] memory = {}
 						.imageMemoryBarrierCount = image_count,
 						.pImageMemoryBarriers = vk_images.ptr,
 					};
-					device.backend.vk.vtable.cmdPipelineBarrier2(cmd.backend.vk.cmd, &dependency);
+					vk::cmdPipelineBarrier2(cmd.backend.vk.cmd, &dependency);
 				}
 			$endif
 		case DX12:
@@ -1891,7 +1913,7 @@ fn void cmd_copy_buffer_to_texture(Cmd* c, Device* device, CmdCopyBufferToTextur
 						.imageOffset = { .x = options.x, .y = options.y, .z = options.z },
 						.imageExtent = { .width = options.width, .height = options.height, .depth = options.depth },
 					};
-					device.backend.vk.vtable.cmdCopyBufferToImage(cmd.backend.vk.cmd, options.src.backend.vk.buffer, options.dst.backend.vk.image, vk::ImageLayout.TRANSFER_DST_OPTIMAL, 1, &region);
+					vk::cmdCopyBufferToImage(cmd.backend.vk.cmd, options.src.backend.vk.buffer, options.dst.backend.vk.image, vk::ImageLayout.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 				}
 			$endif
 		case DX12:
@@ -1989,7 +2011,7 @@ fn void cmd_copy_texture_to_buffer(Cmd* c, Device* device, CmdCopyTextureToBuffe
 						.imageOffset = { .x = options.x, .y = options.y, .z = options.z },
 						.imageExtent = { .width = options.width, .height = options.height, .depth = options.depth },
 					};
-					device.backend.vk.vtable.cmdCopyImageToBuffer(cmd.backend.vk.cmd, options.src.backend.vk.image, vk::ImageLayout.TRANSFER_SRC_OPTIMAL, options.dst.backend.vk.buffer, 1, &region);
+					vk::cmdCopyImageToBuffer(cmd.backend.vk.cmd, options.src.backend.vk.image, vk::ImageLayout.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, options.dst.backend.vk.buffer, 1, &region);
 				}
 			$endif
 		case DX12:
@@ -2057,7 +2079,7 @@ fn void cmd_copy_buffer(Cmd* c, Device* device, Buffer* src, ulong src_offset, B
 					Cmd* cmd = c;
 					(void)device;
 					vk::BufferCopy region = { .srcOffset = src_offset, .dstOffset = dst_offset, .size = size };
-					device.backend.vk.vtable.cmdCopyBuffer(cmd.backend.vk.cmd, src.backend.vk.buffer, dst.backend.vk.buffer, 1, &region);
+					vk::cmdCopyBuffer(cmd.backend.vk.cmd, src.backend.vk.buffer, dst.backend.vk.buffer, 1, &region);
 				}
 			$endif
 		case DX12:
@@ -2144,7 +2166,7 @@ fn void cmd_copy_image(Cmd* c, Device* device, Image* src, Image* dst, ImageCopy
 						.dstOffset = { .x = d.dst_x, .y = d.dst_y, .z = d.dst_z },
 						.extent = { .width = d.width, .height = d.height, .depth = d.depth },
 					};
-					device.backend.vk.vtable.cmdCopyImage(cmd.backend.vk.cmd, src.backend.vk.image, vk::ImageLayout.TRANSFER_SRC_OPTIMAL, dst.backend.vk.image, vk::ImageLayout.TRANSFER_DST_OPTIMAL, 1, &region);
+					vk::cmdCopyImage(cmd.backend.vk.cmd, src.backend.vk.image, vk::ImageLayout.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst.backend.vk.image, vk::ImageLayout.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 				}
 			$endif
 		case DX12:
@@ -2154,24 +2176,24 @@ fn void cmd_copy_image(Cmd* c, Device* device, Image* src, Image* dst, ImageCopy
 					(void)device;
 					assert(src != null && dst != null, "image copy requires source and destination images");
 					assert(src.backend.dx12.resource && dst.backend.dx12.resource, "image copy resources must be initialized");
-					ImageDx12* s = &src.backend.dx12;
-					ImageDx12* d = &dst.backend.dx12;
+					ImageDx12* src_img = &src.backend.dx12;
+					ImageDx12* dst_img = &dst.backend.dx12;
 					d3d12::GraphicsCommandList* list = cmd.backend.dx12.list;
 
 					d3d12::TextureCopyLocation src_loc = {};
-					src_loc.resource = s.resource;
+					src_loc.resource = src_img.resource;
 					src_loc.type = d3d12::TextureCopyType.SUBRESOURCE_INDEX;
-					src_loc.subresource_index = dx12_copy_subresource(s, d.src_mip_level, d.src_array_layer, BarrierAspect.COLOR);
+					src_loc.subresource_index = dx12_copy_subresource(src_img, d.src_mip_level, d.src_array_layer, BarrierAspect.COLOR);
 					d3d12::TextureCopyLocation dst_loc = {};
-					dst_loc.resource = d.resource;
+					dst_loc.resource = dst_img.resource;
 					dst_loc.type = d3d12::TextureCopyType.SUBRESOURCE_INDEX;
-					dst_loc.subresource_index = dx12_copy_subresource(d, d.dst_mip_level, d.dst_array_layer, BarrierAspect.COLOR);
+					dst_loc.subresource_index = dx12_copy_subresource(dst_img, d.dst_mip_level, d.dst_array_layer, BarrierAspect.COLOR);
 
 					// A copy of the whole source subresource passes no box (required for
 					// depth-stencil and multisampled resources).
-					uint mip_width = s.width >> d.src_mip_level;
-					uint mip_height = s.height >> d.src_mip_level;
-					uint mip_depth = s.depth >> d.src_mip_level;
+					uint mip_width = src_img.width >> d.src_mip_level;
+					uint mip_height = src_img.height >> d.src_mip_level;
+					uint mip_depth = src_img.depth >> d.src_mip_level;
 					if (mip_width == 0) mip_width = 1;
 					if (mip_height == 0) mip_height = 1;
 					if (mip_depth == 0) mip_depth = 1;
@@ -2364,6 +2386,7 @@ fn void mtl_copy_layout(Format format, uint width, uint height, uint bytes_per_r
 // is only legal once the GPU finished every list recorded from the pool.
 module rhi @feat(RHI_DX12 & !RHI_HEADLESS & !WASM & WIN32);
 import d3d12, dxgi;
+import std::math::geometry;
 
 const uint DX12_MAX_RENDER_TARGETS = 8;
 // Argument record sizes of the two ExecuteIndirect command signatures.
@@ -2394,7 +2417,7 @@ struct CmdDx12
 // positive extent anchored at the top-left, so the flipped form
 // {y = far edge, height < 0} becomes {y = y + height, height = -height}.
 
-fn d3d12::Rect dx12_rect(std::math::geometry::Rect rect) @local
+fn d3d12::Rect dx12_rect(std::math::geometry::Rect rect) @private
 {
 	return {
 		.left = (int)rect.x,
@@ -2409,7 +2432,7 @@ fn d3d12::Rect dx12_rect(std::math::geometry::Rect rect) @local
 
 // The signature for one draw argument layout, created on first use and owned
 // by the device. Null when creation fails.
-fn d3d12::CommandSignature* dx12_draw_signature(Device* device, bool indexed) @local
+fn d3d12::CommandSignature* dx12_draw_signature(Device* device, bool indexed) @private
 {
 	DeviceDx12* state = &device.backend.dx12;
 	d3d12::CommandSignature** slot = indexed ? &state.draw_indexed_signature : &state.draw_signature;
@@ -2448,7 +2471,7 @@ fn d3d12::CommandSignature* dx12_draw_signature(Device* device, bool indexed) @l
 
 // Append the barrier `before` -> `after` on `resource` (one subresource, or
 // ALL_SUBRESOURCES) to `out`; nothing when the states need no ordering.
-fn uint dx12_emit_barrier(d3d12::ResourceBarrier* out, d3d12::Resource* resource, uint subresource, d3d12::ResourceStates before, d3d12::ResourceStates after) @local
+fn uint dx12_emit_barrier(d3d12::ResourceBarrier* out, d3d12::Resource* resource, uint subresource, d3d12::ResourceStates before, d3d12::ResourceStates after) @private
 {
 	switch (dx12_barrier_kind(before, after))
 	{
@@ -2472,7 +2495,7 @@ fn uint dx12_emit_barrier(d3d12::ResourceBarrier* out, d3d12::Resource* resource
 }
 
 // True when the barrier covers every subresource of the image.
-fn bool dx12_image_barrier_whole(ImageDx12* image, ImageBarrier barrier) @local
+fn bool dx12_image_barrier_whole(ImageDx12* image, ImageBarrier barrier) @private
 {
 	if (barrier.base_mip != 0 || barrier.base_layer != 0) return false;
 	if (barrier.mip_count != 0 && barrier.mip_count < image.mip_levels) return false;
@@ -2488,7 +2511,7 @@ fn bool dx12_image_barrier_whole(ImageDx12* image, ImageBarrier barrier) @local
 
 // Format used by a PLACED_FOOTPRINT: depth planes are copied as their
 // shader-readable single-plane equivalents.
-fn dxgi::Format dx12_copy_format(Format format, BarrierAspect aspect) @local
+fn dxgi::Format dx12_copy_format(Format format, BarrierAspect aspect) @private
 {
 	if (!format_get_props(format).is_depth) return format_to_dxgi(format);
 	if (aspect == BarrierAspect.STENCIL)
@@ -2499,7 +2522,7 @@ fn dxgi::Format dx12_copy_format(Format format, BarrierAspect aspect) @local
 	return format_to_dxgi_srv(format);
 }
 
-fn uint dx12_copy_subresource(ImageDx12* image, uint mip, uint layer, BarrierAspect aspect) @local
+fn uint dx12_copy_subresource(ImageDx12* image, uint mip, uint layer, BarrierAspect aspect) @private
 {
 	uint plane = aspect == BarrierAspect.STENCIL ? 1 : 0;
 	return mip + (layer + plane * image.array_layers) * image.mip_levels;
@@ -2512,7 +2535,7 @@ fn void dx12_copy_buffer_image(
 	Cmd* cmd, Buffer* buffer, Image* img, bool to_texture,
 	ulong buffer_offset, uint bytes_per_row, uint bytes_per_image,
 	uint mip_level, uint base_layer, uint layer_count, BarrierAspect aspect,
-	int x, int y, int z, uint width, uint height, uint depth) @local
+	int x, int y, int z, uint width, uint height, uint depth) @private
 {
 	assert(buffer != null && img != null, "buffer-image copy requires a buffer and image");
 	assert(buffer.backend.dx12.resource && img.backend.dx12.resource, "buffer-image copy resources must be initialized");
@@ -2588,7 +2611,7 @@ struct CmdVk
 fn void cmd_draw_indexed_indirect_count_vk(Cmd* cmd, Device* device, Buffer* buffer, ulong offset, Buffer* count_buffer, ulong count_offset, uint max_draw_count, uint stride)
 {
 	(void)device;
-	device.backend.vk.vtable.cmdDrawIndexedIndirectCount(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, count_buffer.backend.vk.buffer, count_offset, max_draw_count, stride);
+	vk::cmdDrawIndexedIndirectCount(cmd.backend.vk.cmd, buffer.backend.vk.buffer, offset, count_buffer.backend.vk.buffer, count_offset, max_draw_count, stride);
 }
 
 
@@ -2598,9 +2621,9 @@ fn vk::AttachmentLoadOp vk_load_op(LoadOp op) @private
 {
 	switch (op)
 	{
-		case LOAD: return vk::AttachmentLoadOp.LOAD;
-		case CLEAR: return vk::AttachmentLoadOp.CLEAR;
-		case DONT_CARE: return vk::AttachmentLoadOp.DONT_CARE;
+		case LOAD: return vk::AttachmentLoadOp.ATTACHMENT_LOAD_OP_LOAD;
+		case CLEAR: return vk::AttachmentLoadOp.ATTACHMENT_LOAD_OP_CLEAR;
+		case DONT_CARE: return vk::AttachmentLoadOp.ATTACHMENT_LOAD_OP_DONT_CARE;
 	}
 }
 
@@ -2608,8 +2631,8 @@ fn vk::AttachmentStoreOp vk_store_op(StoreOp op) @private
 {
 	switch (op)
 	{
-		case STORE: return vk::AttachmentStoreOp.STORE;
-		case DONT_CARE: return vk::AttachmentStoreOp.DONT_CARE;
+		case STORE: return vk::AttachmentStoreOp.ATTACHMENT_STORE_OP_STORE;
+		case DONT_CARE: return vk::AttachmentStoreOp.ATTACHMENT_STORE_OP_DONT_CARE;
 	}
 }
 
@@ -2640,33 +2663,33 @@ const BarrierStages VK_BARRIER_STAGES_NONE = (BarrierStages)0;
 
 fn vk::ImageLayout vk_resource_state_to_image_layout(ResourceState state) @private
 {
-	if (state == VK_RESOURCE_STATE_NONE) return vk::ImageLayout.UNDEFINED;
-	if ((state & VK_GENERAL_LAYOUT_STATES) != VK_RESOURCE_STATE_NONE) return vk::ImageLayout.GENERAL;
-	if ((state & VK_ATTACHMENT_LAYOUT_STATES) != VK_RESOURCE_STATE_NONE) return vk::ImageLayout.COLOR_ATTACHMENT_OPTIMAL;
-	if (state.depth_write) return vk::ImageLayout.DEPTH_ATTACHMENT_OPTIMAL;
-	if (state.depth_read) return vk::ImageLayout.DEPTH_READ_ONLY_OPTIMAL;
-	if (state.shader_resource) return vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL;
-	if (state.copy_src) return vk::ImageLayout.TRANSFER_SRC_OPTIMAL;
-	if (state.copy_dst) return vk::ImageLayout.TRANSFER_DST_OPTIMAL;
+	if (state == VK_RESOURCE_STATE_NONE) return vk::ImageLayout.IMAGE_LAYOUT_UNDEFINED;
+	if ((state & VK_GENERAL_LAYOUT_STATES) != VK_RESOURCE_STATE_NONE) return vk::ImageLayout.IMAGE_LAYOUT_GENERAL;
+	if ((state & VK_ATTACHMENT_LAYOUT_STATES) != VK_RESOURCE_STATE_NONE) return vk::ImageLayout.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	if (state.depth_write) return vk::ImageLayout.IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+	if (state.depth_read) return vk::ImageLayout.IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
+	if (state.shader_resource) return vk::ImageLayout.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	if (state.copy_src) return vk::ImageLayout.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	if (state.copy_dst) return vk::ImageLayout.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 	if (state.present) return (vk::ImageLayout)1000001002;
-	return vk::ImageLayout.UNDEFINED;
+	return vk::ImageLayout.IMAGE_LAYOUT_UNDEFINED;
 }
 
 fn vk::ImageLayout vk_resource_state_to_image_layout_aspect(ResourceState state, BarrierAspect aspect) @private
 {
 	if (aspect == STENCIL)
 	{
-		if (state == VK_RESOURCE_STATE_NONE) return vk::ImageLayout.UNDEFINED;
-		if ((state & VK_GENERAL_LAYOUT_STATES) != VK_RESOURCE_STATE_NONE) return vk::ImageLayout.GENERAL;
-		if (state.depth_write) return vk::ImageLayout.STENCIL_ATTACHMENT_OPTIMAL;
-		if (state.depth_read) return vk::ImageLayout.STENCIL_READ_ONLY_OPTIMAL;
+		if (state == VK_RESOURCE_STATE_NONE) return vk::ImageLayout.IMAGE_LAYOUT_UNDEFINED;
+		if ((state & VK_GENERAL_LAYOUT_STATES) != VK_RESOURCE_STATE_NONE) return vk::ImageLayout.IMAGE_LAYOUT_GENERAL;
+		if (state.depth_write) return vk::ImageLayout.IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL;
+		if (state.depth_read) return vk::ImageLayout.IMAGE_LAYOUT_STENCIL_READ_ONLY_OPTIMAL;
 	}
 	if (aspect == DEPTH_STENCIL)
 	{
-		if (state == VK_RESOURCE_STATE_NONE) return vk::ImageLayout.UNDEFINED;
-		if ((state & VK_GENERAL_LAYOUT_STATES) != VK_RESOURCE_STATE_NONE) return vk::ImageLayout.GENERAL;
-		if (state.depth_write) return vk::ImageLayout.DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-		if (state.depth_read) return vk::ImageLayout.DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+		if (state == VK_RESOURCE_STATE_NONE) return vk::ImageLayout.IMAGE_LAYOUT_UNDEFINED;
+		if ((state & VK_GENERAL_LAYOUT_STATES) != VK_RESOURCE_STATE_NONE) return vk::ImageLayout.IMAGE_LAYOUT_GENERAL;
+		if (state.depth_write) return vk::ImageLayout.IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+		if (state.depth_read) return vk::ImageLayout.IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 	}
 	return vk_resource_state_to_image_layout(state);
 }
@@ -2674,24 +2697,24 @@ fn vk::ImageLayout vk_resource_state_to_image_layout_aspect(ResourceState state,
 fn vk::AccessFlags2 vk_resource_state_to_access(ResourceState state) @private
 {
 	vk::AccessFlags2 access;
-	if (state.general) access |= vk::ACCESS_2_SHADER_READ_BIT | vk::ACCESS_2_SHADER_WRITE_BIT;
-	if (state.render_target) access |= vk::ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-	if (state.render_target_read) access |= vk::ACCESS_2_COLOR_ATTACHMENT_READ_BIT | vk::ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-	if (state.depth_write) access |= vk::ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | vk::ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-	if (state.depth_read) access |= vk::ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
-	if (state.shader_resource) access |= vk::ACCESS_2_SHADER_SAMPLED_READ_BIT | vk::ACCESS_2_SHADER_READ_BIT;
-	if (state.storage_read) access |= vk::ACCESS_2_SHADER_STORAGE_READ_BIT;
-	if (state.storage_write) access |= vk::ACCESS_2_SHADER_STORAGE_WRITE_BIT;
-	if (state.copy_src) access |= vk::ACCESS_2_TRANSFER_READ_BIT;
-	if (state.copy_dst) access |= vk::ACCESS_2_TRANSFER_WRITE_BIT;
-	if (state.indirect_argument) access |= vk::ACCESS_2_INDIRECT_COMMAND_READ_BIT;
-	if (state.vertex_buffer) access |= vk::ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT;
-	if (state.index_buffer) access |= vk::ACCESS_2_INDEX_READ_BIT;
-	if (state.constant_buffer) access |= vk::ACCESS_2_UNIFORM_READ_BIT;
-	if (state.accel_read || state.accel_build_input) access |= vk::ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
-	if (state.accel_write) access |= vk::ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
-	if (state.clear_storage) access |= vk::ACCESS_2_TRANSFER_WRITE_BIT;
-	if (state.host_read) access |= vk::ACCESS_2_HOST_READ_BIT;
+	if (state.general) access |= vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT | vk::AccessFlagBits2.ACCESS_2_SHADER_WRITE_BIT;
+	if (state.render_target) access |= vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+	if (state.render_target_read) access |= vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_READ_BIT | vk::AccessFlagBits2.ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+	if (state.depth_write) access |= vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	if (state.depth_read) access |= vk::AccessFlagBits2.ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+	if (state.shader_resource) access |= vk::AccessFlagBits2.ACCESS_2_SHADER_SAMPLED_READ_BIT | vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT;
+	if (state.storage_read) access |= vk::AccessFlagBits2.ACCESS_2_SHADER_STORAGE_READ_BIT;
+	if (state.storage_write) access |= vk::AccessFlagBits2.ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+	if (state.copy_src) access |= vk::AccessFlagBits2.ACCESS_2_TRANSFER_READ_BIT;
+	if (state.copy_dst) access |= vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT;
+	if (state.indirect_argument) access |= vk::AccessFlagBits2.ACCESS_2_INDIRECT_COMMAND_READ_BIT;
+	if (state.vertex_buffer) access |= vk::AccessFlagBits2.ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT;
+	if (state.index_buffer) access |= vk::AccessFlagBits2.ACCESS_2_INDEX_READ_BIT;
+	if (state.constant_buffer) access |= vk::AccessFlagBits2.ACCESS_2_UNIFORM_READ_BIT;
+	if (state.accel_read || state.accel_build_input) access |= vk::AccessFlagBits2.ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+	if (state.accel_write) access |= vk::AccessFlagBits2.ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+	if (state.clear_storage) access |= vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT;
+	if (state.host_read) access |= vk::AccessFlagBits2.ACCESS_2_HOST_READ_BIT;
 	return access;
 }
 
@@ -2712,19 +2735,19 @@ fn VkStageMaskResult vk_stage_mask_from_state(ResourceState state, BarrierCapabi
 	VkStageMaskResult result = { .ok = true };
 	if ((state & VK_SHADER_ACCESS_STATES) != VK_RESOURCE_STATE_NONE)
 	{
-		result.mask |= vk::PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
-		result.mask |= vk::PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-		result.mask |= vk::PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-		if (caps.ray_tracing_pipeline_enabled) result.mask |= vk::PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+		result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+		result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+		result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+		if (caps.ray_tracing_pipeline_enabled) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
 	}
-	if (state.render_target || state.render_target_read) result.mask |= vk::PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-	if (state.depth_write || state.depth_read) result.mask |= vk::PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | vk::PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-	if (state.copy_src || state.copy_dst) result.mask |= vk::PIPELINE_STAGE_2_COPY_BIT | vk::PIPELINE_STAGE_2_BLIT_BIT | vk::PIPELINE_STAGE_2_CLEAR_BIT;
-	if (state.indirect_argument) result.mask |= vk::PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-	if (state.vertex_buffer || state.index_buffer) result.mask |= vk::PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
-	if ((state & VK_ACCEL_STATES) != VK_RESOURCE_STATE_NONE) result.mask |= vk::PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
-	if (state.clear_storage) result.mask |= vk::PIPELINE_STAGE_2_CLEAR_BIT;
-	if (state.host_read) result.mask |= vk::PIPELINE_STAGE_2_HOST_BIT;
+	if (state.render_target || state.render_target_read) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+	if (state.depth_write || state.depth_read) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+	if (state.copy_src || state.copy_dst) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COPY_BIT | vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_BLIT_BIT | vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_CLEAR_BIT;
+	if (state.indirect_argument) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+	if (state.vertex_buffer || state.index_buffer) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
+	if ((state & VK_ACCEL_STATES) != VK_RESOURCE_STATE_NONE) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+	if (state.clear_storage) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_CLEAR_BIT;
+	if (state.host_read) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_HOST_BIT;
 	return result;
 }
 
@@ -2733,40 +2756,40 @@ fn VkStageMaskResult vk_stage_bits_to_vk(BarrierStages stages, ResourceState fal
 	if (!vk_barrier_state_supported(fallback, caps)) return {};
 	if (stages == VK_BARRIER_STAGES_NONE) return vk_stage_mask_from_state(fallback, caps);
 	VkStageMaskResult result = { .ok = true };
-	if (fallback.render_target || fallback.render_target_read) result.mask |= vk::PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-	if (fallback.depth_write || fallback.depth_read) result.mask |= vk::PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | vk::PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+	if (fallback.render_target || fallback.render_target_read) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+	if (fallback.depth_write || fallback.depth_read) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
 	if ((fallback.copy_src || fallback.copy_dst) && (stages.copy || stages.blit || stages.clear)) {
 		// The explicit transfer hint supplies the fixed-function transfer stage.
 	} else if (fallback.copy_src || fallback.copy_dst) {
-		result.mask |= vk::PIPELINE_STAGE_2_COPY_BIT | vk::PIPELINE_STAGE_2_BLIT_BIT | vk::PIPELINE_STAGE_2_CLEAR_BIT;
+		result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COPY_BIT | vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_BLIT_BIT | vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_CLEAR_BIT;
 	}
-	if (fallback.clear_storage) result.mask |= vk::PIPELINE_STAGE_2_CLEAR_BIT;
-	if (fallback.indirect_argument) result.mask |= vk::PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-	if (fallback.vertex_buffer || fallback.index_buffer) result.mask |= vk::PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
-	if (fallback.host_read) result.mask |= vk::PIPELINE_STAGE_2_HOST_BIT;
-	if (stages.vertex) result.mask |= vk::PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
-	if (stages.fragment) result.mask |= vk::PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
-	if (stages.compute) result.mask |= vk::PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+	if (fallback.clear_storage) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_CLEAR_BIT;
+	if (fallback.indirect_argument) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+	if (fallback.vertex_buffer || fallback.index_buffer) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
+	if (fallback.host_read) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_HOST_BIT;
+	if (stages.vertex) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+	if (stages.fragment) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+	if (stages.compute) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
 	if (stages.ray_tracing)
 	{
 		BarrierStages non_ray = stages;
 		non_ray.ray_tracing = false;
 		bool raster_shader_stage = non_ray.vertex || non_ray.fragment || non_ray.compute;
 		if (!caps.ray_tracing_pipeline_enabled && (non_ray == VK_BARRIER_STAGES_NONE || (!raster_shader_stage && (fallback & VK_SHADER_ACCESS_STATES) != VK_RESOURCE_STATE_NONE))) return {};
-		if (caps.ray_tracing_pipeline_enabled) result.mask |= vk::PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
+		if (caps.ray_tracing_pipeline_enabled) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
 	}
-	if (stages.draw_indirect) result.mask |= vk::PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
-	if (stages.copy) result.mask |= vk::PIPELINE_STAGE_2_COPY_BIT;
-	if (stages.blit) result.mask |= vk::PIPELINE_STAGE_2_BLIT_BIT;
-	if (stages.clear) result.mask |= vk::PIPELINE_STAGE_2_CLEAR_BIT;
+	if (stages.draw_indirect) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_DRAW_INDIRECT_BIT;
+	if (stages.copy) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COPY_BIT;
+	if (stages.blit) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_BLIT_BIT;
+	if (stages.clear) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_CLEAR_BIT;
 	if (stages.accel_build)
 	{
 		if (!caps.acceleration_structure_enabled) return {};
-		result.mask |= vk::PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+		result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
 	}
-	if (stages.color_attachment) result.mask |= vk::PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-	if (stages.host) result.mask |= vk::PIPELINE_STAGE_2_HOST_BIT;
-	if (fallback.accel_write) result.mask |= vk::PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+	if (stages.color_attachment) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+	if (stages.host) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_HOST_BIT;
+	if (fallback.accel_write) result.mask |= vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
 	return result;
 }
 
@@ -2774,9 +2797,9 @@ fn vk::ImageAspectFlags vk_barrier_aspect(BarrierAspect aspect) @private
 {
 	switch (aspect)
 	{
-		case COLOR: return vk::IMAGE_ASPECT_COLOR_BIT;
-		case DEPTH: return vk::IMAGE_ASPECT_DEPTH_BIT;
-		case STENCIL: return vk::IMAGE_ASPECT_STENCIL_BIT;
-		case DEPTH_STENCIL: return vk::IMAGE_ASPECT_DEPTH_BIT | vk::IMAGE_ASPECT_STENCIL_BIT;
+		case COLOR: return vk::ImageAspectFlagBits.IMAGE_ASPECT_COLOR_BIT;
+		case DEPTH: return vk::ImageAspectFlagBits.IMAGE_ASPECT_DEPTH_BIT;
+		case STENCIL: return vk::ImageAspectFlagBits.IMAGE_ASPECT_STENCIL_BIT;
+		case DEPTH_STENCIL: return vk::ImageAspectFlagBits.IMAGE_ASPECT_DEPTH_BIT | vk::ImageAspectFlagBits.IMAGE_ASPECT_STENCIL_BIT;
 	}
 }

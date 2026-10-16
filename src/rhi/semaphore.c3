@@ -95,14 +95,14 @@ struct SemaphoreVk
 
 fn Semaphore? semaphore_init_vk(Device* device)
 {
-	vk::SemaphoreCreateInfo create_info = { .sType = SEMAPHORE_CREATE_INFO };
+	vk::SemaphoreCreateInfo create_info = { .sType = vk::StructureType.STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
 	vk::Semaphore semaphore;
-	vk_check(device.backend.vk.vtable.createSemaphore(device.backend.vk.device, &create_info, null, &semaphore))!;
+	vk_check(vk::vkCreateSemaphore(device.backend.vk.device, &create_info, null, &semaphore))!;
 	return { .backend.vk = { .semaphore = semaphore } };
 }
 
 fn void semaphore_deinit_vk(Semaphore* s, Device* device)
 {
-	device.backend.vk.vtable.destroySemaphore(device.backend.vk.device, s.backend.vk.semaphore, null);
+	vk::destroySemaphore(device.backend.vk.device, s.backend.vk.semaphore, null);
 	s.backend.vk.semaphore = (vk::Semaphore)0;
 }

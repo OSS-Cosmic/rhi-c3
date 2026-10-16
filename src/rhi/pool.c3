@@ -27,12 +27,12 @@ fn Pool? pool_init(Device* device, Queue* queue)
 			$if HAS_VK:
 				{
 					vk::CommandPoolCreateInfo info = {
-						.sType = vk::StructureType.COMMAND_POOL_CREATE_INFO,
-						.flags = vk::COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+						.sType = vk::StructureType.STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+						.flags = vk::CommandPoolCreateFlagBits.COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
 						.queueFamilyIndex = queue.backend.vk.family_index,
 					};
 					vk::CommandPool command_pool;
-					vk_check(device.backend.vk.vtable.createCommandPool(device.backend.vk.device, &info, null, &command_pool))!;
+					vk_check(vk::vkCreateCommandPool(device.backend.vk.device, &info, null, &command_pool))!;
 					return { .backend.vk = { .queue = queue, .pool = command_pool } };
 				}
 			$endif
@@ -83,7 +83,7 @@ fn void? pool_reset(Pool* p, Device* device)
 		case VK:
 			$if HAS_VK:
 				{
-					return vk_check(device.backend.vk.vtable.resetCommandPool(device.backend.vk.device, p.backend.vk.pool, 0));
+					return vk_check(vk::vkResetCommandPool(device.backend.vk.device, p.backend.vk.pool, (vk::CommandPoolResetFlags)0));
 				}
 			$endif
 		case DX12:
@@ -122,7 +122,7 @@ fn void pool_deinit(Pool* p, Device* device)
 	{
 		case VK:
 			$if HAS_VK:
-				device.backend.vk.vtable.destroyCommandPool(device.backend.vk.device, p.backend.vk.pool, null);
+				vk::destroyCommandPool(device.backend.vk.device, p.backend.vk.pool, null);
 			$endif
 		case DX12:
 			$if HAS_DX12:

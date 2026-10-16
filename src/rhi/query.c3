@@ -202,12 +202,12 @@ struct QueryPoolVk
 fn QueryPool? query_pool_init_vk(Device* device, QueryPoolDesc desc)
 {
 	vk::QueryPoolCreateInfo info = {
-		.sType = vk::StructureType.QUERY_POOL_CREATE_INFO,
-		.queryType = vk::QueryType.OCCLUSION,
+		.sType = vk::StructureType.STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+		.queryType = vk::QueryType.QUERY_TYPE_OCCLUSION,
 		.queryCount = desc.query_count,
 	};
 	vk::QueryPool pool;
-	vk_check(device.backend.vk.vtable.createQueryPool(device.backend.vk.device, &info, null, &pool))!;
+	vk_check(vk::vkCreateQueryPool(device.backend.vk.device, &info, null, &pool))!;
 	return {
 		.query_count = desc.query_count,
 		// The pool itself is always host-readable on Vulkan.
@@ -221,7 +221,7 @@ fn void query_pool_deinit_vk(QueryPool* p, Device* device)
 {
 	if (p.backend.vk.pool != (vk::QueryPool)0)
 	{
-		device.backend.vk.vtable.destroyQueryPool(device.backend.vk.device, p.backend.vk.pool, null);
+		vk::destroyQueryPool(device.backend.vk.device, p.backend.vk.pool, null);
 	}
 	p.backend.vk = {};
 }
@@ -229,13 +229,103 @@ fn void query_pool_deinit_vk(QueryPool* p, Device* device)
 fn bool query_pool_get_results_vk(QueryPool* p, Device* device, uint first, uint count, ulong* results)
 {
 	// No WAIT bit: NOT_READY is a valid "try again next frame", not an error.
-	vk::Result r = device.backend.vk.vtable.getQueryPoolResults(
+	vk::Result r = vk::vkGetQueryPoolResults(
 		device.backend.vk.device, p.backend.vk.pool, first, count,
-		(usz)count * 8, results, 8, vk::QUERY_RESULT_64_BIT); // 8 = one 64-bit result
+		(usz)count * 8, results, 8, vk::QueryResultFlagBits.QUERY_RESULT_64_BIT); // 8 = one 64-bit result
 	return r == vk::Result.SUCCESS;
 }
 
 fn void cmd_reset_query_pool_vk(Cmd* c, Device* device, QueryPool* p, uint first, uint count)
 {
-	device.backend.vk.vtable.cmdResetQueryPool(c.backend.vk.cmd, p.backend.vk.pool, first, count);
+	vk::cmdResetQueryPool(c.backend.vk.cmd, p.backend.vk.pool, first, count);
+}
+
+// ---- d3d12 ----
+
+// D3D12 occlusion query pool: an occlusion query heap plus a READBACK buffer
+// that `cmd_resolve_query_pool` resolves into. Backs query.c3.
+module rhi @feat(RHI_DX12 & !RHI_HEADLESS & !WASM & WIN32);
+import d3d12, dxgi;
+
+struct QueryPoolDx12
+{
+	// Owned.
+	d3d12::QueryHeap* heap;
+	// Owned: one 64-bit slot per query, persistently mapped.
+	Buffer readback;
+	d3d12::QueryType query_type;
+}
+
+fn QueryPool? query_pool_init_dx12(Device* device, QueryPoolDesc desc)
+{
+	d3d12::Device* dev = device.backend.dx12.device;
+	d3d12::QueryHeapDesc heap_desc = {
+		.type = d3d12::QueryHeapType.OCCLUSION,
+		.count = desc.query_count,
+	};
+	dxgi::Guid iid = d3d12::IID_QUERY_HEAP;
+	d3d12::QueryHeap* heap;
+	dx12_check(dev.vtbl.create_query_heap(dev, &heap_desc, &iid, (void**)&heap))!;
+
+	Buffer? readback = buffer_init_general(device, {
+		.size = (sz)desc.query_count * 8,
+		.buffer_usage = READBACK,
+	});
+	if (catch err = readback)
+	{
+		dxgi::release(heap);
+		return err~;
+	}
+	return {
+		.query_count = desc.query_count,
+		// Nothing is readable until a resolve covers it.
+		.resolved_count = 0,
+		// D3D12 always supports precise counting.
+		.type = desc.type,
+		.backend.dx12 = {
+			.heap = heap,
+			.readback = readback,
+			.query_type = desc.type == QueryType.OCCLUSION_BINARY
+				? d3d12::QueryType.BINARY_OCCLUSION
+				: d3d12::QueryType.OCCLUSION,
+		},
+	};
+}
+
+fn void query_pool_deinit_dx12(QueryPool* p, Device* device)
+{
+	QueryPoolDx12* q = &p.backend.dx12;
+	buffer_deinit(&q.readback, device);
+	if (q.heap) dxgi::release(q.heap);
+	*q = {};
+}
+
+fn bool query_pool_get_results_dx12(QueryPool* p, Device* device, uint first, uint count, ulong* results)
+{
+	(void)device;
+	if (!query_range_resolved(p.resolved_count, first, count)) return false;
+	char[] region = p.backend.dx12.readback.mapped_region;
+	if (region.ptr == null) return false;
+	mem::copy(results, region.ptr + (usz)first * 8, (usz)count * 8);
+	return true;
+}
+
+// D3D12 queries need no reset; they are overwritten when begun.
+fn void cmd_reset_query_pool_dx12(Cmd* c, Device* device, QueryPool* p, uint first, uint count)
+{
+	(void)c;
+	(void)device;
+	(void)p;
+	(void)first;
+	(void)count;
+}
+
+fn void cmd_resolve_query_pool_dx12(Cmd* c, Device* device, QueryPool* p, uint first, uint count)
+{
+	(void)device;
+	QueryPoolDx12* q = &p.backend.dx12;
+	d3d12::GraphicsCommandList* list = c.backend.dx12.list;
+	list.vtbl.resolve_query_data(list, q.heap, q.query_type, first, count, q.readback.backend.dx12.resource, (ulong)first * 8);
+	// The resolve covers a prefix for readers; record the high-water mark.
+	if (first + count > p.resolved_count) p.resolved_count = first + count;
 }

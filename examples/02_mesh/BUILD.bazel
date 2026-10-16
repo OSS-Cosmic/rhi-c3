@@ -1,0 +1,15 @@
+package(default_visibility = ["//visibility:public"])
+
+load("//tools:examples.bzl", "rhi_example")
+load("//tools:slang.bzl", "shader_set")
+
+shader_set([
+    ("//examples/assets:02_mesh.slang", "vertexMain", "vertex", "02_mesh.vert"),
+    ("//examples/assets:02_mesh.slang", "fragmentMain", "fragment", "02_mesh.frag"),
+])
+
+rhi_example(
+    name = "02_mesh",
+    backends = ["vulkan", "dx12", "metal", "web"],
+    has_shaders = True,
+)

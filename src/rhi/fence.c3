@@ -41,13 +41,13 @@ fn Fence? fence_init(Device* device, bool signaled)
 			$if HAS_VK:
 				{
 					vk::FenceCreateFlags flags;
-					if (signaled) flags = vk::FENCE_CREATE_SIGNALED_BIT;
+					if (signaled) flags = vk::FenceCreateFlagBits.FENCE_CREATE_SIGNALED_BIT;
 					vk::FenceCreateInfo create_info = {
-						.sType = FENCE_CREATE_INFO,
+						.sType = vk::StructureType.STRUCTURE_TYPE_FENCE_CREATE_INFO,
 						.flags = flags,
 					};
 					vk::Fence fence;
-					vk_check(device.backend.vk.vtable.createFence(device.backend.vk.device, &create_info, null, &fence))!;
+					vk_check(vk::vkCreateFence(device.backend.vk.device, &create_info, null, &fence))!;
 					return { .backend.vk = { .fence = fence } };
 				}
 			$endif
@@ -265,7 +265,7 @@ struct FenceVk
 
 fn void fence_deinit_vk(Fence* f, Device* device)
 {
-	device.backend.vk.vtable.destroyFence(device.backend.vk.device, f.backend.vk.fence, null);
+	vk::destroyFence(device.backend.vk.device, f.backend.vk.fence, null);
 	f.backend.vk.fence = (vk::Fence)0;
 }
 
@@ -277,12 +277,12 @@ fn void? fence_wait_vk(Device* device, Fence*[] fences)
 	{
 		vk_fences[i] = f.backend.vk.fence;
 	}
-	return vk_check(device.backend.vk.vtable.waitForFences(device.backend.vk.device, (uint)fences.len, &vk_fences, vk::TRUE, ulong::max));
+	return vk_check(vk::vkWaitForFences(device.backend.vk.device, (uint)fences.len, &vk_fences, vk::TRUE, ulong::max));
 }
 
 fn FenceStatus? fence_status_vk(Fence* f, Device* device)
 {
-	vk::Result r = device.backend.vk.vtable.getFenceStatus(device.backend.vk.device, f.backend.vk.fence);
+	vk::Result r = vk::vkGetFenceStatus(device.backend.vk.device, f.backend.vk.fence);
 	switch (r)
 	{
 		case vk::Result.SUCCESS:

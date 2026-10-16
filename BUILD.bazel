@@ -1,0 +1,101 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//tools:c3.bzl", "c3_check", "c3_test")
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files(["project.json"])
+
+filegroup(
+    name = "c3_src",
+    srcs = glob(["src/**/*.c3"]) + glob(["src/rhi/shaders/*"]),
+)
+
+# Vulkan bindings: the vendor/vulkan.c3l submodule (module `vk`).
+filegroup(
+    name = "vk_src",
+    srcs = glob(["vendor/vulkan.c3l/vk/**/*.c3"]) + ["vendor/vulkan.c3l/manifest.json"],
+)
+
+filegroup(
+    name = "c3_tests",
+    srcs = glob(["test/**"]),
+)
+
+cc_library(
+    name = "vma",
+    srcs = ["vendor/vma_impl.cpp"],
+    hdrs = glob(["vendor/VulkanMemoryAllocator/include/*.h"]),
+    copts = [
+        "-std=c++17",
+        "-O2",
+        "-fPIC",
+        "-DVMA_STATIC_VULKAN_FUNCTIONS=0",
+        "-DVMA_DYNAMIC_VULKAN_FUNCTIONS=1",
+    ],
+    includes = ["vendor/VulkanMemoryAllocator/include"],
+    linkstatic = True,
+)
+
+cc_library(
+    name = "imgui",
+    srcs = glob(["vendor/imgui_c/imgui/*.cpp"]) + [
+        "vendor/imgui_c/imgui_c.cpp",
+    ] + glob(["vendor/imgui_c/imgui/*.h"]) + ["vendor/imgui_c/imgui_c.h"],
+    copts = [
+        "-std=c++17",
+        "-O2",
+        "-fPIC",
+        "-fno-exceptions",
+        "-fno-rtti",
+        "-DNDEBUG",
+    ],
+    includes = ["vendor/imgui_c", "vendor/imgui_c/imgui"],
+    linkstatic = True,
+)
+
+# D3D12MA is cross-built with mingw; Bazel's host toolchain cannot produce it.
+# Build manually: bazel build //:d3d12ma --platforms=<mingw platform>.
+cc_library(
+    name = "d3d12ma",
+    srcs = [
+        "vendor/d3d12ma/D3D12MemAlloc.cpp",
+        "vendor/d3d12ma/d3d12ma_c.cpp",
+        "vendor/d3d12ma/d3d12ma_c.h",
+    ],
+    hdrs = ["vendor/d3d12ma/include/D3D12MemAlloc.h"],
+    copts = ["-std=c++17", "-O2"],
+    includes = ["vendor/d3d12ma", "vendor/d3d12ma/include"],
+    linkstatic = True,
+    tags = ["manual"],
+)
+
+# --- compile-only legs ---------------
+c3_check(name = "check_linux_x64", target = "linux-x64", native_deps = [":vma", ":imgui", "@sdl3//:sdl3"])
+c3_check(name = "check_windows_x64", target = "windows-x64")
+c3_check(
+    name = "check_macos_aarch64",
+    target = "macos-aarch64",
+    shaders = ["//examples/03_imgui:shaders_metal"],
+)
+# Project mode cannot target wasm32 (the `vk` package forbids it); the web
+# example build is the wasm32 leg.
+alias(name = "check_wasm32", actual = "//examples/00_clear:web")
+c3_check(
+    name = "check_tests_macos",
+    target = "macos-aarch64",
+    run_tests = True,
+    shaders = ["//examples/03_imgui:shaders_metal"],
+)
+c3_check(name = "check_headless", target = "linux-x64", defines = ["RHI_HEADLESS"])
+
+c3_test(
+    name = "c3_host",
+    linkopts = ["-l", "stdc++", "-l", "X11-xcb"],
+    native_deps = [":vma", ":imgui", "@sdl3//:sdl3"],
+)
+
+test_suite(
+    name = "check",
+    tags = ["manual"],
+    tests = [":c3_host"],
+)

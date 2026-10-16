@@ -44,6 +44,7 @@ struct ProgramVk { char _unused; }
 struct ProgramPipelineSlotVk { char _unused; }
 struct ProgramDescriptorSetVk { char _unused; }
 struct QueryPoolVk { char _unused; }
+struct AccelStructureVk { char _unused; }
 
 // ---- d3d12 ----
 module rhi @feat(!(RHI_DX12 & !RHI_HEADLESS & !WASM & WIN32));

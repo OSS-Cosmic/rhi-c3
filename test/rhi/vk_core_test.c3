@@ -22,21 +22,25 @@ fn void renderer_init_deinit() @test
 
 fn void format_mapping_round_trips() @test
 {
-	test::@check(to_vk_format(Format.UNKNOWN) == vk::Format.UNDEFINED);
+	test::@check(to_vk_format(Format.UNKNOWN) == vk::Format.FORMAT_UNDEFINED);
 
-	foreach (row : VK_FORMAT_MAPPINGS)
+	for (usz i = 0; i < Format::len; i++)
 	{
-		// Count how many rows share this vk value
+		Format format = Format::from_ordinal(i);
+		vk::Format vk_format = to_vk_format(format);
+		if (vk_format == vk::Format.FORMAT_UNDEFINED) continue;
+
+		// Count how many formats share this vk value
 		int duplicate_count = 0;
-		foreach (other : VK_FORMAT_MAPPINGS)
+		for (usz j = 0; j < Format::len; j++)
 		{
-			if (other.vk == row.vk) duplicate_count++;
+			if (to_vk_format(Format::from_ordinal(j)) == vk_format) duplicate_count++;
 		}
 
 		// Only test round-trip for non-aliased values
 		if (duplicate_count == 1)
 		{
-			test::eq(from_vk_format(to_vk_format(row.rhi)), row.rhi);
+			test::eq(from_vk_format(vk_format), format);
 		}
 	}
 }

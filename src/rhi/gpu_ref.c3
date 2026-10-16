@@ -20,11 +20,11 @@ struct GpuRef <Type>
 	Type inner;
 	Device* device;
 	GpuRefFinalize{Type} finalize;
-	Allocator allocator;
+	alloc::Allocator allocator;
 }
 
 // Heap-allocate a box. Refcount starts at 1; the final deref frees the box.
-fn GpuRef{Type}*? gpu_ref_create(Device* device, Type value, GpuRefFinalize{Type} finalize, Allocator allocator = mem) <Type>
+fn GpuRef{Type}*? gpu_ref_create(Device* device, Type value, GpuRefFinalize{Type} finalize, alloc::Allocator allocator = mem) <Type>
 {
 	GpuRef{Type}* result = alloc::new_try(allocator, GpuRef{Type})!;
 	*result = {

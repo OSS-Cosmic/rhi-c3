@@ -234,7 +234,7 @@ fn uint webgl_topology(PrimitiveTopology topology)
 
 fn uint webgl_components(VertexFormat format)
 {
-	switch (format) { case FLOAT: return 1; case FLOAT2: return 2; case FLOAT3: return 3; case FLOAT4: return 4; }
+	switch (format) { case FLOAT: return 1; case FLOAT2: return 2; case FLOAT3: return 3; case FLOAT4: return 4; case UBYTE4_NORM: return 4; }
 }
 
 fn uint webgl_wrap(SamplerAddress address)
@@ -348,7 +348,7 @@ struct SwapchainWebgl
 
 // ---- renderer, adapter, device, queue and lifetime ---------------------
 
-fn void? renderer_init_webgl(RendererWebglOptions opts, Allocator allocator = mem)
+fn void? renderer_init_webgl(RendererWebglOptions opts, alloc::Allocator allocator = mem)
 {
 	if (gl_available() == 0) return UNSUPPORTED_BACKEND~;
 	renderer.backend = WEBGL;
@@ -361,7 +361,7 @@ fn void renderer_deinit_webgl()
 	renderer.webgl.available = false;
 }
 
-fn List{PhysicalAdapter}? enumerate_adapters_webgl(Allocator allocator = mem)
+fn List{PhysicalAdapter}? enumerate_adapters_webgl(alloc::Allocator allocator = mem)
 {
 	if (gl_available() == 0) return UNSUPPORTED_BACKEND~;
 	List{PhysicalAdapter} adapters;
@@ -376,7 +376,7 @@ fn List{PhysicalAdapter}? enumerate_adapters_webgl(Allocator allocator = mem)
 	return adapters;
 }
 
-fn Device? device_init_webgl(PhysicalAdapter* adapter, Allocator allocator = mem)
+fn Device? device_init_webgl(PhysicalAdapter* adapter, alloc::Allocator allocator = mem)
 {
 	if (adapter == null || !adapter.backend.webgl.available) return INITIALIZATION_FAILED~;
 	Device d = {};
@@ -681,7 +681,7 @@ fn CommandRingElement command_ring_buffer_get_webgl(CommandRingBuffer{POOL_COUNT
 	return e;
 }
 
-fn Swapchain? swapchain_init_webgl(Device* device, SwapchainDesc desc, Allocator allocator = mem)
+fn Swapchain? swapchain_init_webgl(Device* device, SwapchainDesc desc, alloc::Allocator allocator = mem)
 {
 	swapchain_validate_desc(desc)!;
 	if (desc.source.kind != WINDOW || desc.source.window.kind != CANVAS) return UNSUPPORTED_FEATURE~;

@@ -1,0 +1,17 @@
+package(default_visibility = ["//visibility:public"])
+
+load("//tools:examples.bzl", "rhi_example")
+load("//tools:slang.bzl", "shader_set")
+
+shader_set([
+    ("//examples/assets:04_svt.slang", "vertexMain", "vertex", "04_svt.vert"),
+    ("//examples/assets:04_svt.slang", "compositeMain", "fragment", "04_svt_composite.frag"),
+    ("//examples/assets:04_svt_feedback.slang", "feedbackMain", "fragment", "04_svt_feedback.frag"),
+])
+
+rhi_example(
+    name = "04_svt",
+    backends = ["vulkan", "dx12"],
+    imgui = True,
+    has_shaders = True,
+)

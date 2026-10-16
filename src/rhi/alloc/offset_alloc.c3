@@ -141,7 +141,7 @@ const OffsetNode OFFSET_NODE_EMPTY @private = {
 
 struct OffsetAllocator
 {
-	Allocator allocator;
+	alloc::Allocator allocator;
 	uint size;
 	uint max_allocs;
 	uint free_storage;
@@ -153,7 +153,7 @@ struct OffsetAllocator
 	uint free_offset;
 }
 
-fn void? OffsetAllocator.init(&self, uint size, uint max_allocs, Allocator allocator = mem)
+fn void? OffsetAllocator.init(&self, uint size, uint max_allocs, alloc::Allocator allocator = mem)
 {
 	*self = {
 		.allocator = allocator,

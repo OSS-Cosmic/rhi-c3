@@ -144,10 +144,10 @@ fn Image? image_init(Device* device, ImageDesc desc)
 						return UNSUPPORTED_FEATURE~;
 					}
 					vk::ImageCreateFlags create_flags;
-					if (desc.flags.cube_compatible) create_flags |= vk::IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
-					if (desc.flags.block_texel_view_compatible) create_flags |= vk::IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT;
+					if (desc.flags.cube_compatible) create_flags |= vk::ImageCreateFlagBits.IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+					if (desc.flags.block_texel_view_compatible) create_flags |= vk::ImageCreateFlagBits.IMAGE_CREATE_BLOCK_TEXEL_VIEW_COMPATIBLE_BIT;
 					vk::ImageCreateInfo create_info = {
-						.sType = vk::StructureType.IMAGE_CREATE_INFO,
+						.sType = vk::StructureType.STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 						.flags = create_flags,
 						.imageType = image_type_vk(desc.image_type),
 						.format = to_vk_format(desc.format),
@@ -155,10 +155,10 @@ fn Image? image_init(Device* device, ImageDesc desc)
 						.mipLevels = desc.mip_levels,
 						.arrayLayers = desc.array_layers,
 						.samples = (vk::SampleCountFlagBits)image_samples_vk(desc.samples),
-						.tiling = desc.tiling == OPTIMAL ? vk::ImageTiling.OPTIMAL : vk::ImageTiling.LINEAR,
+						.tiling = desc.tiling == OPTIMAL ? vk::ImageTiling.IMAGE_TILING_OPTIMAL : vk::ImageTiling.IMAGE_TILING_LINEAR,
 						.usage = image_usage_flags_vk(desc.usage),
-						.sharingMode = vk::SharingMode.EXCLUSIVE,
-						.initialLayout = vk::ImageLayout.UNDEFINED,
+						.sharingMode = vk::SharingMode.SHARING_MODE_EXCLUSIVE,
+						.initialLayout = vk::ImageLayout.IMAGE_LAYOUT_UNDEFINED,
 					};
 					vma::AllocationCreateInfo allocation_info = { .usage = image_memory_usage_vk(desc.memory_usage) };
 					vk::Image image;
@@ -698,15 +698,15 @@ struct ImageVk
 fn vk::ImageUsageFlags image_usage_flags_vk(ImageUsage usage) @private
 {
 	vk::ImageUsageFlags flags;
-	if (usage.transfer_src) flags |= vk::IMAGE_USAGE_TRANSFER_SRC_BIT;
-	if (usage.transfer_dst) flags |= vk::IMAGE_USAGE_TRANSFER_DST_BIT;
-	if (usage.sampled) flags |= vk::IMAGE_USAGE_SAMPLED_BIT;
-	if (usage.storage) flags |= vk::IMAGE_USAGE_STORAGE_BIT;
-	if (usage.color_attachment) flags |= vk::IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-	if (usage.depth_stencil_attachment) flags |= vk::IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-	if (usage.shading_rate) flags |= vk::IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
-	if (usage.transient_attachment) flags |= vk::IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
-	if (usage.input_attachment) flags |= vk::IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+	if (usage.transfer_src) flags |= vk::ImageUsageFlagBits.IMAGE_USAGE_TRANSFER_SRC_BIT;
+	if (usage.transfer_dst) flags |= vk::ImageUsageFlagBits.IMAGE_USAGE_TRANSFER_DST_BIT;
+	if (usage.sampled) flags |= vk::ImageUsageFlagBits.IMAGE_USAGE_SAMPLED_BIT;
+	if (usage.storage) flags |= vk::ImageUsageFlagBits.IMAGE_USAGE_STORAGE_BIT;
+	if (usage.color_attachment) flags |= vk::ImageUsageFlagBits.IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	if (usage.depth_stencil_attachment) flags |= vk::ImageUsageFlagBits.IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	if (usage.shading_rate) flags |= vk::ImageUsageFlagBits.IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+	if (usage.transient_attachment) flags |= vk::ImageUsageFlagBits.IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+	if (usage.input_attachment) flags |= vk::ImageUsageFlagBits.IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
 	return flags;
 }
 
@@ -714,9 +714,9 @@ fn vk::ImageType image_type_vk(ImageType type) @private
 {
 	switch (type)
 	{
-		case D1: return vk::ImageType.TYPE_1D;
-		case D2: return vk::ImageType.TYPE_2D;
-		case D3: return vk::ImageType.TYPE_3D;
+		case D1: return vk::ImageType.IMAGE_TYPE_1D;
+		case D2: return vk::ImageType.IMAGE_TYPE_2D;
+		case D3: return vk::ImageType.IMAGE_TYPE_3D;
 	}
 }
 
@@ -724,13 +724,13 @@ fn vk::SampleCountFlagBits image_samples_vk(ImageSampleCount samples) @private
 {
 	switch (samples)
 	{
-		case S1: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_1_BIT;
-		case S2: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_2_BIT;
-		case S4: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_4_BIT;
-		case S8: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_8_BIT;
-		case S16: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_16_BIT;
-		case S32: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_32_BIT;
-		case S64: return (vk::SampleCountFlagBits)vk::SAMPLE_COUNT_64_BIT;
+		case S1: return (vk::SampleCountFlagBits)vk::SampleCountFlagBits.SAMPLE_COUNT_1_BIT;
+		case S2: return (vk::SampleCountFlagBits)vk::SampleCountFlagBits.SAMPLE_COUNT_2_BIT;
+		case S4: return (vk::SampleCountFlagBits)vk::SampleCountFlagBits.SAMPLE_COUNT_4_BIT;
+		case S8: return (vk::SampleCountFlagBits)vk::SampleCountFlagBits.SAMPLE_COUNT_8_BIT;
+		case S16: return (vk::SampleCountFlagBits)vk::SampleCountFlagBits.SAMPLE_COUNT_16_BIT;
+		case S32: return (vk::SampleCountFlagBits)vk::SampleCountFlagBits.SAMPLE_COUNT_32_BIT;
+		case S64: return (vk::SampleCountFlagBits)vk::SampleCountFlagBits.SAMPLE_COUNT_64_BIT;
 	}
 }
 
@@ -750,7 +750,7 @@ fn void image_deinit_vk(Image* img, Device* device)
 	if (img.backend.vk.allocation != null) {
 		vma::destroy_image(device.backend.vk.vma_allocator, img.backend.vk.image, img.backend.vk.allocation);
 	} else if (img.backend.vk.image != (vk::Image)0) {
-		device.backend.vk.vtable.destroyImage(device.backend.vk.device, img.backend.vk.image, null);
+		vk::destroyImage(device.backend.vk.device, img.backend.vk.image, null);
 	}
 	img.backend.vk = {};
 }
@@ -758,18 +758,18 @@ fn void image_deinit_vk(Image* img, Device* device)
 fn void? vk_upload_barrier(Device* device, vk::CommandBuffer cmd, vk::Image image, vk::ImageLayout old_layout, vk::ImageLayout new_layout, uint mip_level, uint base_layer, uint layer_count) @private
 {
 	vk::ImageMemoryBarrier2 barrier = {
-		.sType = vk::StructureType.IMAGE_MEMORY_BARRIER_2,
-		.srcStageMask = old_layout == vk::ImageLayout.UNDEFINED ? vk::PIPELINE_STAGE_2_TOP_OF_PIPE_BIT : vk::PIPELINE_STAGE_2_COPY_BIT,
-		.srcAccessMask = old_layout == vk::ImageLayout.UNDEFINED ? vk::ACCESS_2_NONE : vk::ACCESS_2_TRANSFER_WRITE_BIT,
-		.dstStageMask = new_layout == vk::ImageLayout.TRANSFER_DST_OPTIMAL ? vk::PIPELINE_STAGE_2_COPY_BIT : vk::PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-		.dstAccessMask = new_layout == vk::ImageLayout.TRANSFER_DST_OPTIMAL ? vk::ACCESS_2_TRANSFER_WRITE_BIT : vk::ACCESS_2_SHADER_READ_BIT,
+		.sType = vk::StructureType.STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+		.srcStageMask = old_layout == vk::ImageLayout.IMAGE_LAYOUT_UNDEFINED ? vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_TOP_OF_PIPE_BIT : vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COPY_BIT,
+		.srcAccessMask = old_layout == vk::ImageLayout.IMAGE_LAYOUT_UNDEFINED ? vk::AccessFlagBits2.ACCESS_2_NONE : vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT,
+		.dstStageMask = new_layout == vk::ImageLayout.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ? vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_COPY_BIT : vk::PipelineStageFlagBits2.PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+		.dstAccessMask = new_layout == vk::ImageLayout.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ? vk::AccessFlagBits2.ACCESS_2_TRANSFER_WRITE_BIT : vk::AccessFlagBits2.ACCESS_2_SHADER_READ_BIT,
 		.oldLayout = old_layout,
 		.newLayout = new_layout,
 		.srcQueueFamilyIndex = uint::max,
 		.dstQueueFamilyIndex = uint::max,
 		.image = image,
 		.subresourceRange = {
-			.aspectMask = vk::IMAGE_ASPECT_COLOR_BIT,
+			.aspectMask = vk::ImageAspectFlagBits.IMAGE_ASPECT_COLOR_BIT,
 			.baseMipLevel = mip_level,
 			.levelCount = 1,
 			.baseArrayLayer = base_layer,
@@ -777,11 +777,11 @@ fn void? vk_upload_barrier(Device* device, vk::CommandBuffer cmd, vk::Image imag
 		},
 	};
 	vk::DependencyInfo dependency = {
-		.sType = vk::StructureType.DEPENDENCY_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_DEPENDENCY_INFO,
 		.imageMemoryBarrierCount = 1,
 		.pImageMemoryBarriers = &barrier,
 	};
-	device.backend.vk.vtable.cmdPipelineBarrier2(cmd, &dependency);
+	vk::cmdPipelineBarrier2(cmd, &dependency);
 }
 
 fn void? image_upload_vk(Image* image, Device* device, ImageUploadOptions options)
@@ -830,26 +830,26 @@ fn void? image_upload_vk(Image* image, Device* device, ImageUploadOptions option
 	buffer_flush(&staging, device);
 
 	vk::CommandPool pool;
-	vk::CommandPoolCreateInfo pool_info = { .sType = vk::StructureType.COMMAND_POOL_CREATE_INFO, .flags = vk::COMMAND_POOL_CREATE_TRANSIENT_BIT, .queueFamilyIndex = device.graphics_queue.backend.vk.family_index };
-	vk_check(device.backend.vk.vtable.createCommandPool(device.backend.vk.device, &pool_info, null, &pool))!;
-	defer device.backend.vk.vtable.destroyCommandPool(device.backend.vk.device, pool, null);
+	vk::CommandPoolCreateInfo pool_info = { .sType = vk::StructureType.STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .flags = vk::CommandPoolCreateFlagBits.COMMAND_POOL_CREATE_TRANSIENT_BIT, .queueFamilyIndex = device.graphics_queue.backend.vk.family_index };
+	vk_check(vk::vkCreateCommandPool(device.backend.vk.device, &pool_info, null, &pool))!;
+	defer vk::destroyCommandPool(device.backend.vk.device, pool, null);
 	vk::CommandBuffer cmd;
 	vk::CommandBufferAllocateInfo alloc_info = {
-		.sType = vk::StructureType.COMMAND_BUFFER_ALLOCATE_INFO,
+		.sType = vk::StructureType.STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
 		.commandPool = pool,
-		.level = vk::CommandBufferLevel.PRIMARY,
+		.level = vk::CommandBufferLevel.COMMAND_BUFFER_LEVEL_PRIMARY,
 		.commandBufferCount = 1,
 	};
-	vk_check(device.backend.vk.vtable.allocateCommandBuffers(device.backend.vk.device, &alloc_info, &cmd))!;
-	defer device.backend.vk.vtable.freeCommandBuffers(device.backend.vk.device, pool, 1, &cmd);
-	vk::CommandBufferBeginInfo begin_info = { .sType = vk::StructureType.COMMAND_BUFFER_BEGIN_INFO, .flags = vk::COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
-	vk_check(device.backend.vk.vtable.beginCommandBuffer(cmd, &begin_info))!;
-	vk_upload_barrier(device, cmd, vk_image.image, vk::ImageLayout.UNDEFINED, vk::ImageLayout.TRANSFER_DST_OPTIMAL, options.mip_level, options.base_array_layer, layer_count)!;
+	vk_check(vk::vkAllocateCommandBuffers(device.backend.vk.device, &alloc_info, &cmd))!;
+	defer vk::freeCommandBuffers(device.backend.vk.device, pool, 1, &cmd);
+	vk::CommandBufferBeginInfo begin_info = { .sType = vk::StructureType.STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, .flags = vk::CommandBufferUsageFlagBits.COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT };
+	vk_check(vk::vkBeginCommandBuffer(cmd, &begin_info))!;
+	vk_upload_barrier(device, cmd, vk_image.image, vk::ImageLayout.IMAGE_LAYOUT_UNDEFINED, vk::ImageLayout.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, options.mip_level, options.base_array_layer, layer_count)!;
 	vk::BufferImageCopy copy = {
 		.bufferRowLength = (uint)(bytes_per_row / stride),
 		.bufferImageHeight = (uint)rows_per_image,
 		.imageSubresource = {
-			.aspectMask = vk::IMAGE_ASPECT_COLOR_BIT,
+			.aspectMask = vk::ImageAspectFlagBits.IMAGE_ASPECT_COLOR_BIT,
 			.mipLevel = options.mip_level,
 			.baseArrayLayer = options.base_array_layer,
 			.layerCount = layer_count,
@@ -857,11 +857,11 @@ fn void? image_upload_vk(Image* image, Device* device, ImageUploadOptions option
 		.imageOffset = { .x = (int)options.origin.x, .y = (int)options.origin.y, .z = (int)options.origin.z },
 		.imageExtent = { .width = options.extent.width, .height = options.extent.height, .depth = options.extent.depth },
 	};
-	device.backend.vk.vtable.cmdCopyBufferToImage(cmd, staging.backend.vk.buffer, vk_image.image, vk::ImageLayout.TRANSFER_DST_OPTIMAL, 1, &copy);
-	vk_upload_barrier(device, cmd, vk_image.image, vk::ImageLayout.TRANSFER_DST_OPTIMAL, vk::ImageLayout.SHADER_READ_ONLY_OPTIMAL, options.mip_level, options.base_array_layer, layer_count)!;
-	vk_check(device.backend.vk.vtable.endCommandBuffer(cmd))!;
-	vk::CommandBufferSubmitInfo cmd_submit = { .sType = vk::StructureType.COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd };
-	vk::SubmitInfo2 submit = { .sType = vk::StructureType.SUBMIT_INFO_2, .commandBufferInfoCount = 1, .pCommandBufferInfos = &cmd_submit };
-	vk_check(device.backend.vk.vtable.queueSubmit2(device.graphics_queue.backend.vk.queue, 1, &submit, (vk::Fence)0))!;
-	vk_check(device.backend.vk.vtable.queueWaitIdle(device.graphics_queue.backend.vk.queue))!;
+	vk::cmdCopyBufferToImage(cmd, staging.backend.vk.buffer, vk_image.image, vk::ImageLayout.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+	vk_upload_barrier(device, cmd, vk_image.image, vk::ImageLayout.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, vk::ImageLayout.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, options.mip_level, options.base_array_layer, layer_count)!;
+	vk_check(vk::vkEndCommandBuffer(cmd))!;
+	vk::CommandBufferSubmitInfo cmd_submit = { .sType = vk::StructureType.STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cmd };
+	vk::SubmitInfo2 submit = { .sType = vk::StructureType.STRUCTURE_TYPE_SUBMIT_INFO_2, .commandBufferInfoCount = 1, .pCommandBufferInfos = &cmd_submit };
+	vk_check(vk::vkQueueSubmit2(device.graphics_queue.backend.vk.queue, 1, &submit, (vk::Fence)0))!;
+	vk_check(vk::vkQueueWaitIdle(device.graphics_queue.backend.vk.queue))!;
 }
