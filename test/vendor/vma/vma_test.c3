@@ -5,21 +5,29 @@ module vma;
 import std::core::test;
 
 // Sizes below were obtained by compiling this program against the VMA
-// submodule header, with the same defines as vendor/vma_impl.cpp:
+// submodule header, with the same defines as vendor/vma_impl.cpp. Save the
+// uncommented lines below as /tmp/vma_sizes.cpp and, from the repository root, run:
 //
-//   #define VMA_STATIC_VULKAN_FUNCTIONS 0
-//   #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
+//   c++ -std=c++17 -DVMA_STATIC_VULKAN_FUNCTIONS=0 -DVMA_DYNAMIC_VULKAN_FUNCTIONS=1 \
+//       -I vendor/rhi-c3/vendor/VulkanMemoryAllocator/include /tmp/vma_sizes.cpp -o /tmp/vma_sizes
+//   /tmp/vma_sizes
+//
+// Output:
+//   VmaAllocationCreateInfo 56
+//   VmaAllocationInfo 56
+//   VmaVulkanFunctions 224
+//   VmaAllocatorCreateInfo 88
+//
 //   #include "vk_mem_alloc.h"
 //   #include <cstdio>
 //   int main() {
-//       printf("%zu\n", sizeof(VmaAllocationCreateInfo)); // 48
-//       printf("%zu\n", sizeof(VmaAllocationInfo));       // 56
-//       printf("%zu\n", sizeof(VmaVulkanFunctions));      // 224
-//       printf("%zu\n", sizeof(VmaAllocatorCreateInfo));  // 88
+//       std::printf("VmaAllocationCreateInfo %zu\n", sizeof(VmaAllocationCreateInfo));
+//       std::printf("VmaAllocationInfo %zu\n", sizeof(VmaAllocationInfo));
+//       std::printf("VmaVulkanFunctions %zu\n", sizeof(VmaVulkanFunctions));
+//       std::printf("VmaAllocatorCreateInfo %zu\n", sizeof(VmaAllocatorCreateInfo));
 //   }
 //
-// From the repository root, this can be checked with `c++ -std=c++17 -I vendor/VulkanMemoryAllocator/include`
-// (Ubuntu g++ 15.2.0) on x86_64 Linux, where the header resolved
+// Measured with Ubuntu g++ 15.2.0 on x86_64 Linux, where the header resolved
 // VMA_VULKAN_VERSION = 1004000,
 // VMA_EXTERNAL_MEMORY = 1 and VMA_EXTERNAL_MEMORY_WIN32 = 0. All four
 // structs hold only pointers and 32/64-bit scalars, so the sizes are the
@@ -28,7 +36,7 @@ import std::core::test;
 // fails eq's `values must be equatable` contract in c3c 0.8.4.
 fn void struct_size() @test
 {
-	@check_size(AllocationCreateInfo, 48);
+	@check_size(AllocationCreateInfo, 56);
 	@check_size(AllocationInfo, 56);
 	@check_size(VulkanFunctions, 224);
 	@check_size(AllocatorCreateInfo, 88);

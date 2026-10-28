@@ -6,7 +6,7 @@
 // `c3c test -C --target macos-aarch64` still type-checks it.
 module mtl @feat(DARWIN);
 import std::core::test;
-import std::os::macos::objc;
+import std::os::darwin::objc;
 
 // Layouts of the POD structs passed by value through objc_msgSend, from the
 // arm64 Apple headers (NSUInteger and CGFloat are 8 bytes).

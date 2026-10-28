@@ -560,7 +560,7 @@ fn ImageDesc swapchain_image_desc(Format format, ushort width, ushort height)
 // current frame, just as with the web swapchain, while CAMetalLayer manages
 // its own drawable pool internally.
 module rhi @feat(RHI_MTL & DARWIN & !RHI_HEADLESS);
-import std::os::macos::objc;
+import std::os::darwin::objc;
 import mtl;
 
 struct SwapchainMtl

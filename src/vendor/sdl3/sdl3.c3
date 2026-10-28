@@ -90,6 +90,7 @@ struct KeyboardEvent
 	uint scancode;
 	uint key;
 	ushort modifiers;
+	ushort raw;
 	bool down;
 	bool repeat;
 }
@@ -100,7 +101,7 @@ struct TextInputEvent
 	uint reserved;
 	ulong timestamp;
 	uint window_id;
-	char[32] text;
+	ZString text;
 }
 
 union Event

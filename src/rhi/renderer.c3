@@ -377,7 +377,8 @@ fn void? renderer_init_vk(RendererVkOptions opt, alloc::Allocator allocator = me
 			$if env::WIN32:
 				use_ext |= s == "VK_KHR_win32_surface";
 			$else
-				use_ext |= s == "VK_KHR_xlib_surface" || s == "VK_KHR_wayland_surface";
+				// The X11 surface path uses XGetXCBConnection and vkCreateXcbSurfaceKHR.
+				use_ext |= s == "VK_KHR_xcb_surface" || s == "VK_KHR_wayland_surface";
 			$endif
 			use_ext |= s == "VK_KHR_surface";
 			use_ext |= s == "VK_EXT_swapchain_color_space";

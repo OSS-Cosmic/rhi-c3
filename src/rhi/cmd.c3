@@ -9,7 +9,7 @@
 module rhi;
 import d3d12, dxgi, mtl, vk;
 import std::math::geometry;
-import std::os::macos::objc;
+import std::os::darwin::objc;
 
 struct Cmd
 {
@@ -2240,7 +2240,7 @@ fn void cmd_copy_image(Cmd* c, Device* device, Image* src, Image* dst, ImageCopy
 // owned by a Cmd and committed by queue_submit_mtl; encoders are ended before
 // a command buffer is submitted or reused.
 module rhi @feat(RHI_MTL & DARWIN & !RHI_HEADLESS);
-import std::os::macos::objc;
+import std::os::darwin::objc;
 import mtl;
 
 const uint MTL_DRAW_PRIMITIVE_STRIDE = 16;

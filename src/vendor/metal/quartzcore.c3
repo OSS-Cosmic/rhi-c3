@@ -6,7 +6,7 @@
 // between a window surface and Metal. Mirrors metal-cpp/QuartzCore. See
 // wrapper.c3 for conventions and ownership.
 module mtl @feat(DARWIN) @link(env::DARWIN, "QuartzCore.framework");
-import std::os::macos::objc;
+import std::os::darwin::objc;
 
 // -- CAMetalLayer ----------------------------------------------------------
 

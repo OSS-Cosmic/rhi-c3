@@ -173,7 +173,7 @@ fn ShaderStages shader_stages(Shader* s)
 // MTLLibrary; `entry_point` names the function looked up in it. Only vertex
 // and fragment stages are supported.
 module rhi @feat(RHI_MTL & DARWIN & !RHI_HEADLESS);
-import std::os::macos::objc;
+import std::os::darwin::objc;
 import mtl;
 
 struct ShaderMtl

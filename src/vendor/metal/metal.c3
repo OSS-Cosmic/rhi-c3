@@ -7,7 +7,7 @@
 // the matching Apple header. See wrapper.c3 for conventions and ownership.
 // Extend on demand.
 module mtl @feat(DARWIN) @link(env::DARWIN, "Metal.framework");
-import std::os::macos::objc;
+import std::os::darwin::objc;
 
 // MTLCreateSystemDefaultDevice() — a C function exported by the Metal
 // framework (not an Objective-C method). Returns null if Metal is

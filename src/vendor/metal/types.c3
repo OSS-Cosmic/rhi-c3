@@ -13,7 +13,7 @@
 // `typedef ResourceOptions @constinit = NSUInteger;` with one module constant
 // per bit (`mtl::RESOURCE_STORAGE_MODE_PRIVATE`).
 module mtl @feat(DARWIN);
-import std::os::macos::objc;
+import std::os::darwin::objc;
 
 alias NSUInteger = objc::NSUInteger;
 alias NSInteger = objc::NSInteger;

@@ -106,7 +106,7 @@ fn void? queue_submit(Queue* q, Device* device, QueueSubmitDesc desc)
 // CmdMtl and CommandRingElementMtl are defined by the command and ring
 // backends. The queue only owns submission-side shared-event state.
 module rhi @feat(RHI_MTL & DARWIN & !RHI_HEADLESS);
-import std::os::macos::objc;
+import std::os::darwin::objc;
 import std::thread, std::time;
 import mtl;
 

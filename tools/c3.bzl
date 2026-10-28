@@ -212,14 +212,17 @@ def _test_impl(ctx):
     lines = [
         "set -euo pipefail",
         "EXEC=$PWD",
-        'STAGE="$(mktemp -d)"',
-        'trap \'rm -rf "$STAGE"\' EXIT',
+        'STAGE_ROOT="$(mktemp -d)"',
+        'STAGE="$STAGE_ROOT/stage"',
+        'mkdir -p "$STAGE"',
+        'trap \'rm -rf "$STAGE_ROOT"\' EXIT',
     ]
     lines += _stage_lines(files + test_files + [ctx.file._project], shader_files, True)
     lines += _lib_lines(statics, dynamics, True)
     lines.append('export LD_LIBRARY_PATH="$STAGE/_libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"')
-    lines.append('ln -sf "$EXEC/%s" "$STAGE/sdl3.c3l"' % (ctx.file._sdl3_c3l.short_path if True else ctx.file._sdl3_c3l.path))
-    lines.append('cd "$STAGE"')
+    project_dir = ctx.file._project.short_path.rsplit("/", 1)[0] if "/" in ctx.file._project.short_path else "."
+    lines.append('ln -sf "$EXEC/%s" "$STAGE/%s/sdl3.c3l"' % (ctx.file._sdl3_c3l.short_path, project_dir))
+    lines.append('cd "$STAGE/%s"' % project_dir)
     lines.append("%s test --build-dir b --obj-out obj %s" % (C3C, " ".join(_defines(ctx.attr.defines) + _link_args(statics, dynamics, ctx.attr.linkopts))))
     ctx.actions.write(script, "\n".join(lines) + "\n", is_executable = True)
     runfiles = ctx.runfiles(files = files + [ctx.file._sdl3_c3l] + test_files + [ctx.file._project] + shader_files + list(statics.values()) + list(dynamics.values()))

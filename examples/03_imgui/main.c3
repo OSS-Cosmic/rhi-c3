@@ -153,25 +153,27 @@ fn void imgui_forward_modifiers(ushort modifiers, bool down)
 
 fn void imgui_forward_utf8(sdl3_compat::TextInputEvent* event)
 {
+	if (!event.text) return;
+	String text = event.text.str_view();
 	uint offset = 0;
-	while (offset < (uint)event.text.len && event.text[offset] != 0)
+	while (offset < (uint)text.len && text[offset] != 0)
 	{
-		uint first = (uint)event.text[offset] & 0xff;
+		uint first = (uint)text[offset] & 0xff;
 		uint codepoint = first;
 		uint count = 1;
-		if ((first & 0xe0) == 0xc0 && offset + 1 < (uint)event.text.len)
+		if ((first & 0xe0) == 0xc0 && offset + 1 < (uint)text.len)
 		{
-			codepoint = ((first & 0x1f) << 6) | ((uint)event.text[offset + 1] & 0x3f);
+			codepoint = ((first & 0x1f) << 6) | ((uint)text[offset + 1] & 0x3f);
 			count = 2;
 		}
-		else if ((first & 0xf0) == 0xe0 && offset + 2 < (uint)event.text.len)
+		else if ((first & 0xf0) == 0xe0 && offset + 2 < (uint)text.len)
 		{
-			codepoint = ((first & 0x0f) << 12) | (((uint)event.text[offset + 1] & 0x3f) << 6) | ((uint)event.text[offset + 2] & 0x3f);
+			codepoint = ((first & 0x0f) << 12) | (((uint)text[offset + 1] & 0x3f) << 6) | ((uint)text[offset + 2] & 0x3f);
 			count = 3;
 		}
-		else if ((first & 0xf8) == 0xf0 && offset + 3 < (uint)event.text.len)
+		else if ((first & 0xf8) == 0xf0 && offset + 3 < (uint)text.len)
 		{
-			codepoint = ((first & 0x07) << 18) | (((uint)event.text[offset + 1] & 0x3f) << 12) | (((uint)event.text[offset + 2] & 0x3f) << 6) | ((uint)event.text[offset + 3] & 0x3f);
+			codepoint = ((first & 0x07) << 18) | (((uint)text[offset + 1] & 0x3f) << 12) | (((uint)text[offset + 2] & 0x3f) << 6) | ((uint)text[offset + 3] & 0x3f);
 			count = 4;
 		}
 		rhi::imgui_layer_add_input_character(&state.imgui, codepoint);

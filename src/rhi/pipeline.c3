@@ -301,7 +301,7 @@ fn bool pipeline_is_empty(Pipeline* p)
 // Extension: per-attachment blending (rhi-zig rejects any blend state with
 // `error.BlendUnsupportedOnMetal`), raster state and texture slots.
 module rhi @feat(RHI_MTL & DARWIN & !RHI_HEADLESS);
-import std::os::macos::objc;
+import std::os::darwin::objc;
 import mtl;
 
 // Metal buffer index of vertex-buffer slot 0; push constants own index 0.

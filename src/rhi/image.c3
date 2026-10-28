@@ -374,7 +374,7 @@ fn bool image_is_empty(Image* img)
 // points use an `_impl` suffix to keep backend-specific names distinct from
 // the front-end dispatch functions.
 module rhi @feat(RHI_MTL & DARWIN & !RHI_HEADLESS);
-import std::os::macos::objc;
+import std::os::darwin::objc;
 import mtl;
 
 struct ImageMtlState

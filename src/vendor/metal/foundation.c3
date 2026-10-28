@@ -6,7 +6,7 @@
 // and device names; error out-parameters; arrays). Mirrors the relevant parts
 // of metal-cpp/Foundation. See wrapper.c3 for conventions and ownership.
 module mtl @feat(DARWIN) @link(env::DARWIN, "Foundation.framework");
-import std::os::macos::objc;
+import std::os::darwin::objc;
 
 // NSUTF8StringEncoding (NSString.h).
 const NSUInteger NS_UTF8_STRING_ENCODING = 4;

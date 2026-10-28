@@ -118,6 +118,9 @@ struct AllocationCreateInfo
 	Pool pool;
 	void* user_data;
 	float priority;
+	// Added upstream after the original binding; without it VMA reads stack
+	// garbage as the minimum alignment and asserts VmaIsPow2.
+	vk::DeviceSize min_alignment;
 }
 
 // VmaAllocationInfo.

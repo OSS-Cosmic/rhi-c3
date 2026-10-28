@@ -33,7 +33,7 @@
 // (Device.max_threads_per_threadgroup, CAMetalLayer.drawable_size) rely on
 // this, so the module refuses to build for anything but AArch64.
 module mtl @feat(DARWIN) @link(env::DARWIN, "objc");
-import std::os::macos::objc;
+import std::os::darwin::objc;
 
 $assert env::AARCH64 : "mtl: only macOS arm64 is supported; x86_64 would need objc_msgSend_stret for struct returns";
 

@@ -357,7 +357,7 @@ fn List{PhysicalAdapter}? enumerate_adapters(alloc::Allocator allocator = mem)
 // `device_deinit_mtl` drops only that one.
 module rhi @feat(RHI_MTL & DARWIN & !RHI_HEADLESS);
 import std::collections::list;
-import std::os::macos::objc;
+import std::os::darwin::objc;
 import mtl;
 
 struct PhysicalAdapterMtl

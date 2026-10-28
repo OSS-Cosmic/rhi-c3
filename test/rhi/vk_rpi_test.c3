@@ -335,6 +335,66 @@ fn void rpi_program_pipeline_cache_vk() @test
 	program_test_expect_no_validation_errors(&env);
 }
 
+fn void rpi_program_depth_attachment_vk() @test
+{
+	ProgramTestEnv env;
+	if (!program_test_env_init(&env)) return;
+	Device* device = &env.dev;
+	ProgramModuleStage[2] modules = program_test_modules();
+	Program program = program_init(device, modules[..], {})!!;
+	ProgramTestTarget target = program_test_target(device);
+	Image depth = image_init(device, {
+		.image_type = D2, .format = D32_SFLOAT, .width = 64, .height = 64,
+		.depth = 1, .mip_levels = 1, .array_layers = 1, .samples = S1,
+		.tiling = OPTIMAL, .usage = { .depth_stencil_attachment = true },
+		.memory_usage = PREFER_DEVICE,
+	})!!;
+	ImageView depth_view = image_view_init(device, &depth, {
+		.view_type = DEPTH_STENCIL_ATTACHMENT, .format = D32_SFLOAT, .aspect = DEPTH,
+		.base_mip = 0, .mip_num = 1, .base_layer = 0, .layer_num = 1,
+	})!!;
+	Pool pool = pool_init(device, &device.graphics_queue)!!;
+	Cmd cmd = cmd_init(device, &pool)!!;
+
+	cmd_begin(&cmd, device)!!;
+	cmd_image_barrier(&cmd, device, {
+		.image = &target.image, .before = {}, .after = { .render_target = true },
+		.aspect = COLOR, .layer_count = 1, .mip_count = 1,
+	});
+	cmd_image_barrier(&cmd, device, {
+		.image = &depth, .before = {}, .after = { .depth_write = true },
+		.aspect = DEPTH, .layer_count = 1, .mip_count = 1,
+	});
+	cmd_begin_rendering(&cmd, device, {
+		.color_attachments = {{ .view = target.view, .load_op = CLEAR, .store_op = STORE, .clear_color = { 0, 0, 0, 1 } }},
+		.depth_attachment = { .view = depth_view, .load_op = CLEAR, .store_op = STORE, .clear_depth = 1 },
+		.has_depth_attachment = true,
+		.render_area = { .width = 64, .height = 64 },
+	});
+	cmd_set_viewport(&cmd, device, { .width = 64, .height = 64, .max_depth = 1 });
+	cmd_set_scissor(&cmd, device, { .width = 64, .height = 64 });
+	ProgramGraphicsPipelineDesc desc = {
+		.topology = TRIANGLE_LIST, .cull_mode = NONE, .front_face = CLOCKWISE,
+		.depth_test = true, .depth_write = true, .depth_compare = ALWAYS,
+		.depth_format = D32_SFLOAT, .has_depth_format = true,
+		.colors = {{ .format = RGBA8_UNORM }},
+	};
+	program_bind_pipeline(&program, device, &cmd, 1, desc)!!;
+	cmd_draw(&cmd, device, 3);
+	cmd_end_rendering(&cmd, device);
+	program_test_submit(&cmd, device);
+
+	cmd_deinit(&cmd, device, &pool);
+	pool_deinit(&pool, device);
+	image_view_deinit(&depth_view, device);
+	image_deinit(&depth, device);
+	image_view_deinit(&target.view, device);
+	image_deinit(&target.image, device);
+	program_deinit(&program, device);
+	program_test_env_deinit(&env);
+	program_test_expect_no_validation_errors(&env);
+}
+
 fn void rpi_program_reflection_vk() @test
 {
 	ProgramTestEnv env;
@@ -454,17 +514,13 @@ fn void rpi_program_compute_dispatch_vk() @test
 		.push_constant = { .stages = { .compute = true }, .size = FillPush::size },
 		.has_push_constant = true,
 	})!!;
-	defer program_deinit(&program, device);
 
 	const uint COUNT = 200;
 	ulong bytes = COUNT * uint::size;
-	Buffer out = buffer_init_general(device, { .size = bytes, .usage = { .shader_resource_storage = true, .transfer_dst = true }, .buffer_usage = READBACK })!!;
-	defer buffer_deinit(&out, device);
+	Buffer out = buffer_init_general(device, { .size = (sz)bytes, .usage = { .shader_resource_storage = true, .transfer_dst = true }, .buffer_usage = READBACK })!!;
 
 	Pool pool = pool_init(device, &device.graphics_queue)!!;
-	defer pool_deinit(&pool, device);
 	Cmd cmd = cmd_init(device, &pool)!!;
-	defer cmd_deinit(&cmd, device, &pool);
 
 	cmd_begin(&cmd, device)!!;
 	program_bind_compute_pipeline(&program, device, &cmd, 1)!!;
@@ -480,6 +536,10 @@ fn void rpi_program_compute_dispatch_vk() @test
 
 	uint* data = (uint*)out.mapped_region.ptr;
 	for (uint i = 0; i < COUNT; i++) test::eq(data[i], i * 3 + 7);
-	program_test_expect_no_validation_errors(&env);
+	cmd_deinit(&cmd, device, &pool);
+	pool_deinit(&pool, device);
+	buffer_deinit(&out, device);
+	program_deinit(&program, device);
 	program_test_env_deinit(&env);
+	program_test_expect_no_validation_errors(&env);
 }
