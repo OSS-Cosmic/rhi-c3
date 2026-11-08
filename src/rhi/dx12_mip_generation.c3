@@ -103,7 +103,6 @@ struct MipGenerationDx12
 	uint[MIP_SETS] descriptor_capacity;
 	bool[MIP_SETS] constant_mapped;
 	uint descriptor_size;
-	bool initialized;
 	List{MipScratchDx12}[MIP_SETS] scratch;
 }
 
@@ -308,7 +307,6 @@ fn void? mip_generation_init_dx12(MipGenerationDx12* self, Device* device, char[
 		dx12_check(buffer.vtbl.map(buffer, 0, null, (void**)&self.constant_data[i]))!;
 		self.constant_mapped[i] = true;
 	}
-	self.initialized = true;
 }
 
 // Releases the scratch images and rewinds the descriptor / constant ranges of
@@ -359,7 +357,7 @@ fn void? mip_generate_dx12(MipGenerationDx12* self, Device* device, Cmd* cmd, ui
 	bool is_3d = x.depth > 1;
 	uint layers = x.layer_count ? x.layer_count : 1;
 	uint view_layers = is_3d ? 1 : layers;
-	if (!self.initialized || set >= MIP_SETS || !x.target || !mip_format_dx12(x.format, &mf)
+	if (set >= MIP_SETS || !x.target || !mip_format_dx12(x.format, &mf)
 		|| !mip_format_supported_dx12(device, x.format, is_3d)
 		|| !x.target.backend.dx12.resource || x.mip_levels < 2
 		|| x.mip_levels > x.target.backend.dx12.mip_levels
